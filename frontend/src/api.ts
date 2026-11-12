@@ -49,3 +49,8 @@ export function jobUrl(id: string, name: ArtifactName): string {
 export function mediaUrl(id: string): string {
   return `/api/jobs/${id}/media`;
 }
+
+/** 映像フレーム画像（ブリッジ側の弦の確認用） */
+export function frameUrl(id: string, name: string): string {
+  return `/api/jobs/${id}/frames/${encodeURIComponent(name)}`;
+}

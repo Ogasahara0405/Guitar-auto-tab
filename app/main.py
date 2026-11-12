@@ -1,4 +1,5 @@
 """Guitar Auto Tab - ローカルWebアプリ (FastAPI)"""
+import asyncio
 import os
 import re
 import shutil
@@ -70,7 +71,8 @@ async def api_analyze(
             with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
                 shutil.copyfileobj(file.file, tmp)
                 tmp_path = tmp.name
-            result = pipeline.analyze(
+            result = await asyncio.to_thread(
+                pipeline.analyze,
                 tmp_path,
                 mode=mode,
                 chord_style=chord_style,
@@ -79,8 +81,8 @@ async def api_analyze(
                 keep_original=tmp_path,
             )
         else:
-            result = pipeline.analyze(
-                url, mode=mode, chord_style=chord_style, is_url=True
+            result = await asyncio.to_thread(
+                pipeline.analyze, url, mode=mode, chord_style=chord_style, is_url=True
             )
         return JSONResponse(result)
     except Exception as e:
@@ -94,7 +96,7 @@ async def api_import(file: UploadFile = File(...)):
         shutil.copyfileobj(file.file, tmp)
         tmp_path = tmp.name
     try:
-        result = pipeline.import_analysis(tmp_path)
+        result = await asyncio.to_thread(pipeline.import_analysis, tmp_path)
     except Exception as e:
         raise HTTPException(400, f"JSONの取り込みに失敗しました: {e}")
     return JSONResponse(result)
@@ -133,6 +135,19 @@ def job_json(jid: str):
     return FileResponse(
         p, media_type="application/json; charset=utf-8", filename="analysis.json"
     )
+
+
+@app.get("/api/jobs/{jid}/frames/{name}")
+def job_frame(jid: str, name: str):
+    """映像フレーム（ブリッジ側の弦の確認用）"""
+    from app.core.video import FRAME_RE
+
+    if not FRAME_RE.match(name):
+        raise HTTPException(404, "フレームがありません")
+    p = _job_dir(jid) / "frames" / name
+    if not p.exists():
+        raise HTTPException(404, "フレームがありません")
+    return FileResponse(p, media_type="image/jpeg")
 
 
 @app.get("/api/jobs/{jid}/media")

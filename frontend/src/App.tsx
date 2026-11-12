@@ -5,6 +5,7 @@ import type { ChordStyle, Mode } from "./api";
 import ModeSelector from "./components/ModeSelector";
 import SourceForm from "./components/SourceForm";
 import PlayerPanel from "./components/PlayerPanel";
+import FrameLink from "./components/FrameLink";
 import TabToolbar from "./components/TabToolbar";
 import TabViewer from "./components/TabViewer";
 
@@ -89,6 +90,7 @@ export default function App() {
         {result && (
           <section className="panel viewer">
             <PlayerPanel result={result} sourceUrl={playerUrl} timeSource={timeSource} />
+            <FrameLink result={result} timeSource={timeSource} />
             <TabToolbar result={result} onImport={handleImport} />
             <TabViewer result={result} timeSource={timeSource} />
             <p className="hint">

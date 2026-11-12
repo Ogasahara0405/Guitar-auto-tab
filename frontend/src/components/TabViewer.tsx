@@ -14,17 +14,24 @@ interface Props {
   timeSource: TimeSource;
 }
 
+/** 同時発音（複数本指・ダブルストップ）とみなす開始時刻の誤差 */
+const GROUP_TOL = 0.05;
+
 function collectEvents(res: AnalysisResult): TabEvent[] {
   const evs: TabEvent[] = [];
   if (res.meta.mode === "melody") {
-    for (const n of res.notes || []) {
+    // 開始時刻がほぼ同じノートは同時発音として1イベント（複数弦のセル）にまとめる
+    const notes = [...(res.notes || [])].sort((a, b) => a.start - b.start);
+    for (const n of notes) {
       if (n.string == null || n.fret == null) continue;
-      evs.push({
-        start: n.start,
-        end: n.end,
-        cells: [{ row: n.string - 1, text: String(n.fret) }],
-        label: null,
-      });
+      const cell = { row: n.string - 1, text: String(n.fret) };
+      const g = evs[evs.length - 1];
+      if (g && !g.label && n.start - g.start <= GROUP_TOL) {
+        g.cells.push(cell);
+        g.end = Math.max(g.end, n.end);
+      } else {
+        evs.push({ start: n.start, end: n.end, cells: [cell], label: null });
+      }
     }
   } else {
     for (const c of res.chords || []) {
@@ -76,6 +83,11 @@ export default function TabViewer({ result, timeSource }: Props) {
       const svg = svgRef.current;
       if (svg) {
         svg.querySelectorAll<SVGRectElement>("rect.ev").forEach((rect) => {
+          const s = Number(rect.dataset.start);
+          const e = Number(rect.dataset.end);
+          rect.classList.toggle("active", t >= s && t < e);
+        });
+        svg.querySelectorAll<SVGRectElement>("rect.evrow").forEach((rect) => {
           const s = Number(rect.dataset.start);
           const e = Number(rect.dataset.end);
           rect.classList.toggle("active", t >= s && t < e);
@@ -143,6 +155,27 @@ export default function TabViewer({ result, timeSource }: Props) {
             className="bar"
           />
         ))}
+
+        {/* 鳴っている弦の行ハイライト（ブリッジ側の映像と照合しやすく） */}
+        {events.map((ev, i) => {
+          const x = ev.start * PX_PER_SEC + LEFT_PAD;
+          const w = Math.max(30, (Math.max(ev.end, ev.start + 0.15) - ev.start) * PX_PER_SEC);
+          return ev.cells.map((c, j) =>
+            c.row >= 0 && c.row <= 5 ? (
+              <rect
+                key={`row${i}_${j}`}
+                className="evrow"
+                data-start={ev.start}
+                data-end={ev.end}
+                x={x - 8}
+                y={STAFF_TOP + c.row * STAFF_GAP - 7}
+                width={w}
+                height={14}
+                rx={4}
+              />
+            ) : null
+          );
+        })}
 
         {/* ノート / コード */}
         {events.map((ev, i) => {

@@ -9,7 +9,8 @@ interface Props {
 
 export default function TabToolbar({ result, onImport }: Props) {
   const modeLabel = result.meta.mode === "melody" ? "メロディ(単音)" : "コード(バッキング)";
-  const title = `${result.meta.title} — ${modeLabel} / ${result.meta.tempo} BPM`;
+  const sepLabel = result.meta.separated ? " / 音源分離: ON" : "";
+  const title = `${result.meta.title} — ${modeLabel} / ${result.meta.tempo} BPM${sepLabel}`;
 
   const save = (name: ArtifactName) => {
     window.location.href = jobUrl(result.id, name);

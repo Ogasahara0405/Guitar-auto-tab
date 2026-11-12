@@ -1,6 +1,14 @@
-"""コード(バッキング)の採譜: 音声 → コードタイムライン"""
+"""コード(バッキング)の採譜: 音声 → コードタイムライン
+
+ミュート確認（音での確認）: 全弦を弾いているように見える押さえ方でも、
+軽く触れて鳴らしていない弦（ミュート）がある場合は音声側に根拠が立たない。
+filter_muted が各弦の実際の鳴りを倍音の過剰（他弦の倍音予測に対する残差）で
+判定し、鳴っていない弦をタブ譜から除く。
+"""
 import numpy as np
 import librosa
+
+from .tabassign import TUNING_MIDI
 
 PITCH = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
@@ -99,3 +107,82 @@ def extract_chords(y: np.ndarray, sr: int, hop_length: int = 512):
         else:
             chords.append({"start": round(a, 3), "end": round(b, 3), "label": lab})
     return {"tempo": tempo, "chords": chords}
+
+
+# ---- ミュート確認（音での確認） ----
+
+_N_FFT_MUTE = 4096
+
+
+def _spec_peak(S: np.ndarray, f: float, sr: int, n_fft: int) -> float:
+    b = int(round(f * n_fft / sr))
+    lo, hi = max(1, b - 2), min(len(S) - 1, b + 2)
+    return float(S[lo: hi + 1].max()) if hi >= lo else 0.0
+
+
+def _string_freq(string_no: int, fret: int) -> float:
+    """弦番号(6..1)とフレットから実音の周波数"""
+    midi = TUNING_MIDI[6 - string_no] + int(fret)
+    return 440.0 * 2.0 ** ((midi - 69) / 12)
+
+
+def _harmonic_model(amps, f_target: float, f0: float) -> float:
+    """他弦の倍音系列モデルによる f_target への混入予測
+
+    amps: その弦の1..4倍音の実測強度。減衰比は幾何平均で推定し、
+    実測値そのもの（＝他の弦の基本音と衝突している可能性がある）は使わない。
+    """
+    if amps[0] <= 1e-9:
+        return 0.0
+    ratio = (amps[2] / amps[0]) ** 0.5 if amps[2] > 1e-9 else 0.45
+    # 実測値は他の弦の基本音と衝突して膨らむことがあるため、ギターらしい減衰比に留める
+    ratio = min(max(ratio, 0.2), 0.55)
+    k = f_target / f0
+    ki = round(k)
+    if ki < 1 or ki > 6 or abs(k - ki) > 0.04 * ki:
+        return 0.0
+    return float(amps[0] * ratio ** (ki - 1))
+
+
+def filter_muted(y: np.ndarray, sr: int, t0: float, t1: float, shape: list):
+    """押さえ方の各弦が「実際に鳴っているか」を音声で確認し、
+    ミュート（鳴っていない）弦を除いたshapeと、除いた弦番号を返す。
+
+    判定は各弦の基本音・2倍音の「他弦の倍音系列モデルに対する残差」で行う
+    （オクターブ上の弦が他弦の倍音と衝突するケースでも誤判定しにくい）。
+    音声の根拠が弱すぎる場合は変更せずそのまま返す。
+    """
+    if not shape or y.size == 0:
+        return list(shape), []
+    i0, i1 = int(t0 * sr), int(t1 * sr)
+    seg = y[i0: i1] if i1 > i0 else np.zeros(1, dtype=y.dtype)
+    if seg.size < int(0.05 * sr):
+        return list(shape), []
+
+    S = np.abs(librosa.stft(seg, n_fft=_N_FFT_MUTE, hop_length=256))
+    S_seg = np.median(S, axis=1)
+
+    freqs = [_string_freq(st["string"], st["fret"]) for st in shape]
+    amps = [[_spec_peak(S_seg, f * k, sr, _N_FFT_MUTE) for k in range(1, 5)] for f in freqs]
+
+    strengths = []
+    for i, f in enumerate(freqs):
+        excess1 = amps[i][0]
+        excess2 = amps[i][1]
+        for j, fj in enumerate(freqs):
+            if i == j:
+                continue
+            excess1 -= _harmonic_model(amps[j], f, fj)
+            excess2 -= _harmonic_model(amps[j], 2 * f, fj)
+        strengths.append(max(excess1, 0.5 * excess2, 0.0))
+
+    mx = max(strengths) if strengths else 0.0
+    if mx <= 1e-9:
+        return list(shape), []
+
+    sounding = [st for st, s in zip(shape, strengths) if s >= 0.12 * mx]
+    muted = [st["string"] for st, s in zip(shape, strengths) if s < 0.12 * mx]
+    if len(sounding) < 2:
+        # 音声側の根拠が弱い（短すぎる・減衰しすぎ等）場合は元の押さえ方を維持
+        return list(shape), []
+    return sounding, muted

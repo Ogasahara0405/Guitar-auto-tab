@@ -1,6 +1,8 @@
 """タブ譜のグリッド配置（ASCII描画・PDF描画の共通レイアウト計算）"""
 import bisect
 
+from .tabassign import GROUP_TOL
+
 
 def build_score(result: dict, slots_per_beat: int | None = None):
     """
@@ -58,18 +60,26 @@ def build_score(result: dict, slots_per_beat: int | None = None):
         occupied[mi].add(slot)
         return mi, slot
 
-    for n in notes:
+    # 開始時刻がほぼ同じノートは同時発音として1イベント（複数弦のセル）にまとめる
+    note_groups = []
+    for n in sorted(notes, key=lambda x: x.get("start", 0.0)):
         if "string" not in n or "fret" not in n:
             continue
         row = int(n["string"]) - 1  # 1弦→row0(上)
         if not (0 <= row <= 5):
             continue
-        mi, slot = place(float(n["start"]))
+        if note_groups and float(n["start"]) - note_groups[-1][0] <= GROUP_TOL:
+            note_groups[-1][1][row] = str(int(n["fret"]))
+        else:
+            note_groups.append((float(n["start"]), {row: str(int(n["fret"]))}))
+
+    for start_t, cells in note_groups:
+        mi, slot = place(start_t)
         events.append(
             {
                 "measure": mi,
                 "slot": slot,
-                "cells": {row: str(int(n["fret"]))},
+                "cells": cells,
                 "label": None,
             }
         )

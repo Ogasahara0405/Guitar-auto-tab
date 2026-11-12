@@ -2,6 +2,7 @@
 import os
 import shutil
 import subprocess
+import time
 
 SR = 22050
 
@@ -16,10 +17,10 @@ def get_ffmpeg_exe() -> str:
     return imageio_ffmpeg.get_ffmpeg_exe()
 
 
-def ensure_wav(src: str, dst: str, sr: int = SR) -> str:
-    """任意の音声/動画ファイルを mono wav に変換してパスを返す"""
+def ensure_wav(src: str, dst: str, sr: int = SR, channels: int = 1) -> str:
+    """任意の音声/動画ファイルを wav に変換してパスを返す（デフォルト: mono 22050Hz）"""
     ff = get_ffmpeg_exe()
-    cmd = [ff, "-y", "-i", src, "-vn", "-ac", "1", "-ar", str(sr), dst]
+    cmd = [ff, "-y", "-i", src, "-vn", "-ac", str(channels), "-ar", str(sr), dst]
     res = subprocess.run(cmd, capture_output=True, text=True)
     if res.returncode != 0 or not os.path.exists(dst):
         raise RuntimeError(f"ffmpeg変換に失敗しました: {res.stderr[-500:]}")
@@ -27,29 +28,57 @@ def ensure_wav(src: str, dst: str, sr: int = SR) -> str:
 
 
 def download_youtube(url: str, outdir: str):
-    """yt-dlpでYouTubeの音声を取得し、(wavパス, タイトル)を返す"""
+    """yt-dlpでYouTubeの音声/映像を取得し、(wavパス, タイトル, 取得元ファイル)を返す
+
+    yt-dlpはダウンロードのみに使用（後処理にffmpeg/ffprobeを要求させない）。
+    wavへの変換はensure_wav（imageio-ffmpeg同梱ffmpeg）で行う。
+    映像付きで取得できる場合は動画も保持し、ブリッジ側の弦の確認用に
+    ノート位置のフレームを切り出せるようにする（取得できない場合は音声のみ）。
+    YouTube側の一時的な403（レート制限・PO Token等）に備え、
+    再試行ごとに再生クライアントを切り替える。
+    """
     import yt_dlp
 
     os.makedirs(outdir, exist_ok=True)
-    ff = get_ffmpeg_exe()
-    opts = {
-        "format": "bestaudio/best",
-        "outtmpl": os.path.join(outdir, "source_dl.%(ext)s"),
-        "quiet": True,
-        "no_warnings": True,
-        "noplaylist": True,
-        "ffmpeg_location": os.path.dirname(ff),
-        "postprocessors": [
-            {"key": "FFmpegExtractAudio", "preferredcodec": "wav"}
-        ],
-    }
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(url, download=True)
+    # 403回避のフォールバック順: 既定 → android_vr → tv → mweb
+    client_cycle = [None, "android_vr", "tv", "mweb"]
+    info = None
+    dl_path = ""
+    last_err = ""
+    for i, client in enumerate(client_cycle):
+        if i:
+            time.sleep(3.0)
+        opts = {
+            # 映像+音声の単一ファイル（480p以下）を優先し、無ければ音声のみ
+            "format": "best[height<=480]/bestaudio/best",
+            "outtmpl": os.path.join(outdir, "source_dl.%(ext)s"),
+            "quiet": True,
+            "no_warnings": True,
+            "noplaylist": True,
+        }
+        if client:
+            opts["extractor_args"] = {"youtube": {"player_client": [client]}}
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                dl_path = ydl.prepare_filename(info)
+            break
+        except Exception as e:
+            last_err = str(e)
+    if info is None:
+        raise RuntimeError(
+            "YouTube音声の取得に失敗しました（"
+            + last_err
+            + "）。アクセスが一時的に制限されている可能性があるため、"
+            "少し待って再試行するか、音声/動画ファイルを直接アップロードしてください。"
+        )
     title = info.get("title") or "youtube_audio"
+    if not os.path.exists(dl_path):
+        raise RuntimeError("YouTube音声の取得結果が見つかりません")
     wav = os.path.join(outdir, "source_dl.wav")
-    if not os.path.exists(wav):
-        raise RuntimeError("YouTube音声の取得結果(wav)が見つかりません")
-    return wav, title
+    if os.path.abspath(dl_path) != os.path.abspath(wav):
+        ensure_wav(dl_path, wav)
+    return wav, title, dl_path
 
 
 def load_audio(path: str, sr: int = SR):

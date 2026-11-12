@@ -8,3 +8,5 @@ python-multipart
 reportlab
 yt-dlp
 imageio-ffmpeg
+# （任意・推奨）音源分離 Demucs は README「音源分離 Demucs の導入」の手順で導入してください
+# （torch をCPU版で先に導入してから demucs を入れると軽量です）

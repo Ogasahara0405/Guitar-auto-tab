@@ -157,6 +157,46 @@ button:disabled { opacity: 0.5; cursor: wait; }
 .tab-svg .cursor { stroke: var(--accent); stroke-width: 2; }
 .tab-svg .ev { fill: transparent; transition: fill 0.08s linear; }
 .tab-svg .ev.active { fill: rgba(77, 163, 255, 0.22); }
+.tab-svg .evrow { fill: transparent; transition: fill 0.08s linear; }
+.tab-svg .evrow.active { fill: rgba(255, 180, 84, 0.35); }
+
+.frame-link {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  background: var(--panel2);
+  border: 1px solid #2f3b4f;
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+.frame-img {
+  flex: 0 0 auto;
+  width: 236px;
+  max-width: 40vw;
+  background: #000;
+  border-radius: 6px;
+  overflow: hidden;
+  min-height: 88px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.frame-img img {
+  width: 100%;
+  display: block;
+}
+.frame-placeholder {
+  color: var(--sub);
+  font-size: 12px;
+  padding: 24px 8px;
+}
+.frame-caption {
+  color: var(--sub);
+  font-size: 13px;
+  line-height: 1.7;
+  padding-top: 4px;
+}
 
 .hint {
   color: var(--sub);
