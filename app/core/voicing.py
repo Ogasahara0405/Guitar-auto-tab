@@ -1,4 +1,10 @@
-"""コードラベル → ギターの押さえ方(ボイシング)。表記は6弦→1弦の順。None=ミュート"""
+"""コードラベル → ギターの押さえ方(ボイシング)。表記は6弦→1弦の順。None=ミュート
+
+押さえ方は1手で押さえられる範囲（開放弦を除くフレット開きが
+tabassign.MAX_FRET_SPAN 以内）のものだけを候補とする。
+"""
+
+from .tabassign import MAX_FRET_SPAN
 
 # 開放コードの定型フォーム { (ルート音名, クオリティ): [6弦..1弦] }
 _OPEN_SHAPES = {
@@ -50,6 +56,12 @@ def _shape_pos(shape):
 
 def np_mean(xs):
     return sum(xs) / len(xs) if xs else 0.0
+
+
+def _hand_ok(shape) -> bool:
+    """開放弦を除くフレット開きが MAX_FRET_SPAN 以内（1手で押さえられる）か"""
+    fretted = [f for f in shape if f is not None and f > 0]
+    return not fretted or max(fretted) - min(fretted) <= MAX_FRET_SPAN
 
 
 def _power_candidates(root: str):
@@ -122,6 +134,10 @@ def shape_for(label: str, chord_style: str, last_pos: float):
         cands = _power_candidates(root)
     else:
         cands = _full_candidates(root, qual) or _power_candidates(root)
+    # 1手で押さえられない押さえ方は候補から外す（無い場合は安全側で残す）
+    ok = [c for c in cands if _hand_ok(c[1])]
+    if ok:
+        cands = ok
     if not cands:
         return None
 

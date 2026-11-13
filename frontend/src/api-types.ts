@@ -15,6 +15,8 @@ export interface AnalysisMeta {
   separated?: boolean | null;
   /** 切り出した映像フレームの枚数（0/未定義なら映像なし） */
   video_frames?: number | null;
+  /** ギター音色モデル（6弦1F〜1弦22Fの学習）で無関係な音と判定して除いたノート数 */
+  tone_dropped?: number | null;
   /** 磨き上げ元ジョブID（フレーム引き継ぎ用） */
   source_job?: string | null;
   generated?: string | null;
@@ -73,6 +75,8 @@ export interface NoteEvent {
   fret: number | null;
   /** 採譜の音声根拠（0..1。大きいほど確実に鳴っている） */
   evidence?: number | null;
+  /** ギター音色モデルとの一致度（0..1。小さいほど無関係な音の可能性） */
+  tone?: number | null;
   /** ブリッジ側の弦の確認用フレーム画像（frames/ 内のファイル名） */
   frame?: string | null;
   /** 追加キーも保持される（契約は known フィールドのみ型検証） */

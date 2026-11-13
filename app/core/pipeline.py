@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import audio, chords, melody, pdf, render, sep, tabassign, video, voicing
+from . import audio, chords, melody, pdf, render, sep, tabassign, tone, video, voicing
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 OUTPUT_DIR = BASE_DIR / "output"
@@ -140,6 +140,9 @@ def analyze(
 
     if mode == "melody":
         notes = melody.extract_notes(y, sr)
+        # ギター音色モデル（6弦1F〜1弦22Fの学習）で無関係な音を除去
+        notes, tinfo = tone.filter_guitar_notes(notes, y, sr)
+        result["meta"]["tone_dropped"] = tinfo["dropped"]
         lane_hints = None
         fret_hints = None
         if play:

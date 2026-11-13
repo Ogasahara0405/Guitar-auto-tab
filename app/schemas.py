@@ -44,6 +44,10 @@ class NoteEvent(_ContractBase):
     evidence: float | None = Field(
         default=None, description="採譜の音声根拠（0..1。大きいほど確実に鳴っている）"
     )
+    tone: float | None = Field(
+        default=None,
+        description="ギター音色モデルとの一致度（0..1。小さいほど無関係な音の可能性）",
+    )
     frame: str | None = Field(
         default=None,
         description="ブリッジ側の弦の確認用フレーム画像（frames/ 内のファイル名）",
@@ -78,6 +82,10 @@ class AnalysisMeta(_ContractBase):
     )
     video_frames: int | None = Field(
         default=None, description="切り出した映像フレームの枚数（0/未定義なら映像なし）"
+    )
+    tone_dropped: int | None = Field(
+        default=None,
+        description="ギター音色モデル（6弦1F〜1弦22Fの学習）で無関係な音と判定して除いたノート数",
     )
     source_job: str | None = Field(
         default=None, description="磨き上げ元ジョブID（フレーム引き継ぎ用）"

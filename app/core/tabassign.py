@@ -2,6 +2,10 @@
 
 複数本指で同時に鳴っているノート（開始時刻がほぼ同じグループ）は、
 重複しない弦の組み合わせとしてまとめて割り当てる。
+同時に鳴らせるのは1手で押さえられる範囲のみ＝開放弦を除くフレット開きは
+MAX_FRET_SPAN 以内（例: 8Fを押さえるなら5〜11Fの間で、最大値−最小値が3まで）。
+この条件を満たす押さえ方しか候補に残さず、物理的に押さえられない同時発音
+（誤検出の疑い）は根拠の弱い声から除く。
 ブリッジ側映像のピッキング位置（弦レーン）や、指板の黒丸マーカー
 から推定したフレット位置の手がかりがあれば、映像に忠実な割当を
 優先する（音声から自然に決まる割当と大きく矛盾する場合のみ音声側を採る）。
@@ -16,6 +20,11 @@ MAX_FRET = 22
 
 # 同時発音とみなす開始時刻の誤差（秒）
 GROUP_TOL = 0.05
+
+# 同時にならせる弦のフレット開きの上限（開放弦は指を使わないので数えない）
+# 1手のポジション（指1〜4本）で押さえられる幅。例: 8Fを押さえるとき
+# 同時に鳴らせるのは5〜11Fの間で、最大値−最小値が3になる場合まで
+MAX_FRET_SPAN = 3
 
 # 映像の弦位置に沿う割当を許すコスト差（手がかり1つあたり）
 LANE_SLACK = 1.5
@@ -71,6 +80,43 @@ def _group_events(notes):
     return events
 
 
+def _fretted_span(combo) -> float:
+    """押さえるフレット（開放弦を除く）の開き。開放弦だけ/単音なら0"""
+    fretted = [f for _, f in combo if f > 0]
+    return (max(fretted) - min(fretted)) if len(fretted) >= 2 else 0.0
+
+
+def _playable_together(midis) -> bool:
+    """この音の組を1手で同時に押さえられるか（弦の重複なし＋開き3以内）"""
+    cands_list = [candidates(int(m)) for m in midis]
+    if any(not c for c in cands_list):
+        return False
+    for combo in itertools.product(*cands_list):
+        strings = [c[0] for c in combo]
+        if len(set(strings)) != len(strings):
+            continue
+        if _fretted_span(combo) <= MAX_FRET_SPAN:
+            return True
+    return False
+
+
+def _trim_to_playable(group):
+    """1手で押さえられない同時発音は、根拠の弱い声から除く
+
+    開放弦以外のフレット開きが MAX_FRET_SPAN を超える同時発音は
+    物理的に同時に鳴らせない（=誤検出の疑い）ため、弱い声から除いて
+    押さえられる組み合わせに収める。除く順は (evidence 昇順, 高い音優先)。
+    """
+    g = list(group)
+    while len(g) > 1 and not _playable_together([n["midi"] for n in g]):
+        weakest = min(
+            range(len(g)),
+            key=lambda i: (g[i].get("evidence", 1.0), -g[i]["midi"]),
+        )
+        g.pop(weakest)
+    return g
+
+
 def _event_placements(group, restrict=None, fret_pref=None):
     """同時発音グループの割当候補: [(コスト, ((弦index, フレット), ...)), ...]
 
@@ -87,7 +133,7 @@ def _event_placements(group, restrict=None, fret_pref=None):
         cands_list.append(c)
     if any(not c for c in cands_list):
         return []
-    out = []
+    out, over = [], []
     for combo in itertools.product(*cands_list):
         strings = [c[0] for c in combo]
         if len(set(strings)) != len(strings):
@@ -95,8 +141,7 @@ def _event_placements(group, restrict=None, fret_pref=None):
         cost = sum(_note_cost(*c) for c in combo)
         # 押さえ方の広がり（弦の間隔とフレットの開きが大きいと不利）
         span_s = max(strings) - min(strings)
-        frets = [c[1] for c in combo]
-        span_f = max(frets) - min(frets)
+        span_f = _fretted_span(combo)  # 開放弦は指を使わないので開きに数えない
         if span_s >= 4 and span_f >= 5:
             cost += 0.4
         elif span_s >= 3 and span_f >= 7:
@@ -107,7 +152,13 @@ def _event_placements(group, restrict=None, fret_pref=None):
             if strings[a] > strings[b]:
                 cost += 0.3
                 break
-        out.append((cost, combo))
+        row = (cost, combo)
+        if span_f <= MAX_FRET_SPAN:
+            out.append(row)   # 1手のポジションで押さえられる
+        else:
+            over.append(row)  # 開きすぎ（押さえ方が無い場合の保険）
+    if not out:
+        out = over  # 3フレット以内の押さえ方が無い同時発音（安全側）
     out.sort(key=lambda x: x[0])
     # 状態数の爆発を防ぐ（良い候補上位に絞る）
     return out[:48]
@@ -240,6 +291,8 @@ def assign_frets(notes, lane_hints=None, fret_hints=None):
     """
     notes: [{"start","end","midi"}] に "string"(6..1, 6=低音E) と "fret" を付与して返す。
     開始時刻がほぼ同じノートは同時発音として、重複しない弦にまとめて割り当てる。
+    同時発音は開放弦以外のフレット開きが MAX_FRET_SPAN 以内（1手で押さえられる
+    範囲）の割当に限定し、それを満たさない同時発音は根拠の弱い声から除く。
     ギター音域外のノートは除去する。
 
     lane_hints: {開始時刻(秒): (映像の弦レーン 0..K-1, レーン数K)} を渡すと、
@@ -251,6 +304,8 @@ def assign_frets(notes, lane_hints=None, fret_hints=None):
     events = _group_events([n for n in notes if candidates(n["midi"])])
     if not events:
         return []
+    # 1手で押さえられない同時発音（誤検出の疑い）は弱い声から除く
+    events = [_trim_to_playable(g) for g in events]
 
     best = _solve(events, None)
     if best is None:
