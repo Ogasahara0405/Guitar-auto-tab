@@ -4,8 +4,9 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "gen:api": "node scripts/gen-api-types.mjs",
+    "dev": "npm run gen:api && vite",
+    "build": "npm run gen:api && tsc --noEmit && vite build",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -1,0 +1,719 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Guitar Auto Tab",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/health": {
+      "get": {
+        "summary": "Health",
+        "operationId": "health_api_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/analyze": {
+      "post": {
+        "summary": "Api Analyze",
+        "operationId": "api_analyze_api_analyze_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_api_analyze_api_analyze_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/import": {
+      "post": {
+        "summary": "Api Import",
+        "description": "Claude Codeで磨いた analysis.json の取り込み",
+        "operationId": "api_import_api_import_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_api_import_api_import_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/jobs/{jid}/tab.pdf": {
+      "get": {
+        "summary": "Job Pdf",
+        "operationId": "job_pdf_api_jobs__jid__tab_pdf_get",
+        "parameters": [
+          {
+            "name": "jid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Jid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/jobs/{jid}/tab.txt": {
+      "get": {
+        "summary": "Job Txt",
+        "operationId": "job_txt_api_jobs__jid__tab_txt_get",
+        "parameters": [
+          {
+            "name": "jid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Jid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/jobs/{jid}/analysis.json": {
+      "get": {
+        "summary": "Job Json",
+        "operationId": "job_json_api_jobs__jid__analysis_json_get",
+        "parameters": [
+          {
+            "name": "jid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Jid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/jobs/{jid}/frames/{name}": {
+      "get": {
+        "summary": "Job Frame",
+        "description": "映像フレーム（ブリッジ側の弦の確認用）",
+        "operationId": "job_frame_api_jobs__jid__frames__name__get",
+        "parameters": [
+          {
+            "name": "jid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Jid"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/jobs/{jid}/media": {
+      "get": {
+        "summary": "Job Media",
+        "operationId": "job_media_api_jobs__jid__media_get",
+        "parameters": [
+          {
+            "name": "jid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Jid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AnalysisMeta": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "duration": {
+            "type": "number",
+            "title": "Duration"
+          },
+          "tempo": {
+            "type": "number",
+            "title": "Tempo"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "melody",
+              "chords"
+            ],
+            "title": "Mode"
+          },
+          "tuning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tuning"
+          },
+          "separated": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Separated",
+            "description": "Demucsによるギター音源分離を使った場合 true"
+          },
+          "video_frames": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Video Frames",
+            "description": "切り出した映像フレームの枚数（0/未定義なら映像なし）"
+          },
+          "source_job": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Job",
+            "description": "磨き上げ元ジョブID（フレーム引き継ぎ用）"
+          },
+          "generated": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generated"
+          },
+          "media_file": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Media File",
+            "description": "ブラウザ再生用に保存された元メディア（ファイル入力時のみ）"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "title",
+          "duration",
+          "tempo",
+          "mode"
+        ],
+        "title": "AnalysisMeta"
+      },
+      "AnalysisResult": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/AnalysisMeta"
+          },
+          "notes": {
+            "items": {
+              "$ref": "#/components/schemas/NoteEvent"
+            },
+            "type": "array",
+            "title": "Notes"
+          },
+          "chords": {
+            "items": {
+              "$ref": "#/components/schemas/ChordEvent"
+            },
+            "type": "array",
+            "title": "Chords"
+          },
+          "beats": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Beats"
+          },
+          "barlines": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Barlines"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "id",
+          "meta",
+          "notes",
+          "chords",
+          "beats",
+          "barlines"
+        ],
+        "title": "AnalysisResult",
+        "description": "API が返す解析結果（analysis.json と同じ構造 + id）"
+      },
+      "Body_api_analyze_api_analyze_post": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "melody",
+              "chords"
+            ],
+            "title": "Mode",
+            "default": "melody"
+          },
+          "chord_style": {
+            "type": "string",
+            "enum": [
+              "chord",
+              "power"
+            ],
+            "title": "Chord Style",
+            "default": "chord"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "default": ""
+          },
+          "file": {
+            "anyOf": [
+              {
+                "type": "string",
+                "contentMediaType": "application/octet-stream"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "title": "Body_api_analyze_api_analyze_post"
+      },
+      "Body_api_import_api_import_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_api_import_api_import_post"
+      },
+      "ChordEvent": {
+        "properties": {
+          "start": {
+            "type": "number",
+            "title": "Start"
+          },
+          "end": {
+            "type": "number",
+            "title": "End"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "shape": {
+            "items": {
+              "$ref": "#/components/schemas/ShapeNote"
+            },
+            "type": "array",
+            "title": "Shape"
+          },
+          "muted": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Muted",
+            "description": "音声確認で鳴っていない（ミュート）と判定して除いた弦番号"
+          },
+          "frame": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frame",
+            "description": "ブリッジ側の弦の確認用フレーム画像（frames/ 内のファイル名）"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "start",
+          "end",
+          "label",
+          "shape"
+        ],
+        "title": "ChordEvent",
+        "description": "1つのコード（バッキング）"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "NoteEvent": {
+        "properties": {
+          "start": {
+            "type": "number",
+            "title": "Start"
+          },
+          "end": {
+            "type": "number",
+            "title": "End"
+          },
+          "midi": {
+            "type": "integer",
+            "title": "Midi"
+          },
+          "string": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "String",
+            "description": "6=低音E弦 … 1=高音e弦（未割当の場合は null）"
+          },
+          "fret": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fret",
+            "description": "フレット番号（未割当の場合は null）"
+          },
+          "evidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence",
+            "description": "採譜の音声根拠（0..1。大きいほど確実に鳴っている）"
+          },
+          "frame": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frame",
+            "description": "ブリッジ側の弦の確認用フレーム画像（frames/ 内のファイル名）"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "start",
+          "end",
+          "midi",
+          "string",
+          "fret"
+        ],
+        "title": "NoteEvent",
+        "description": "1つのノート（同時発音は start が一致した複数ノートとして表現）"
+      },
+      "ShapeNote": {
+        "properties": {
+          "string": {
+            "type": "integer",
+            "title": "String",
+            "description": "6=低音E弦 … 1=高音e弦"
+          },
+          "fret": {
+            "type": "integer",
+            "title": "Fret",
+            "description": "フレット番号"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "string",
+          "fret"
+        ],
+        "title": "ShapeNote",
+        "description": "コード押さえ方の1弦分"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

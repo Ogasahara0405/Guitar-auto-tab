@@ -116,6 +116,11 @@ def analyze(
     duration = float(len(y_mix) / sr)
     tempo, beats, barlines = _grid_times(y_mix, sr)
 
+    # --- 映像を主・音声を従: 映像の演奏動作を先に解析しておく ---
+    # タブに出すのは映像で演奏が確認できるイベントのみ（関係ない音を出さない）。
+    # 映像が無い/動作が検出できない場合は音声の結果をそのまま使う。
+    play = video.analyze_play(raw_path)
+
     result = {
         "meta": {
             "title": title,
@@ -135,12 +140,21 @@ def analyze(
 
     if mode == "melody":
         notes = melody.extract_notes(y, sr)
-        result["notes"] = tabassign.assign_frets(notes)
+        lane_hints = None
+        fret_hints = None
+        if play:
+            notes, vinfo = video.gate_notes(notes, play)
+            lane_hints = vinfo["lane_hints"] or None
+            fret_hints = vinfo["fret_hints"] or None
+        result["notes"] = tabassign.assign_frets(notes, lane_hints=lane_hints, fret_hints=fret_hints)
     else:
         ch = chords.extract_chords(y, sr)
+        chord_list = ch["chords"]
+        if play:
+            chord_list, _ = video.gate_chords(chord_list, play)
         result["meta"]["tempo"] = round(ch["tempo"], 2)
         last_pos = 0.0
-        for c in ch["chords"]:
+        for c in chord_list:
             if c["label"] == "N.C.":
                 continue
             v = voicing.shape_for(c["label"], chord_style, last_pos)

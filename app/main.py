@@ -12,10 +12,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import ValidationError
 
 from app.core import pipeline
+from app.schemas import AnalysisResult, ChordStyle, Mode
 
 
 def _open_browser_when_ready() -> None:
@@ -57,11 +59,11 @@ def health():
 
 @app.post("/api/analyze")
 async def api_analyze(
-    mode: str = Form("melody"),
-    chord_style: str = Form("chord"),
+    mode: Mode = Form("melody"),
+    chord_style: ChordStyle = Form("chord"),
     url: str = Form(""),
     file: UploadFile | None = File(None),
-):
+) -> AnalysisResult:
     url = (url or "").strip()
     if not url and file is None:
         raise HTTPException(400, "YouTube URL またはファイルを指定してください")
@@ -84,13 +86,14 @@ async def api_analyze(
             result = await asyncio.to_thread(
                 pipeline.analyze, url, mode=mode, chord_style=chord_style, is_url=True
             )
-        return JSONResponse(result)
+        # 契約（app/schemas.py）に沿っているかをAPI境界で検証してから返す
+        return AnalysisResult.model_validate(result)
     except Exception as e:
         raise HTTPException(500, f"解析に失敗しました: {e}")
 
 
 @app.post("/api/import")
-async def api_import(file: UploadFile = File(...)):
+async def api_import(file: UploadFile = File(...)) -> AnalysisResult:
     """Claude Codeで磨いた analysis.json の取り込み"""
     with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as tmp:
         shutil.copyfileobj(file.file, tmp)
@@ -99,7 +102,15 @@ async def api_import(file: UploadFile = File(...)):
         result = await asyncio.to_thread(pipeline.import_analysis, tmp_path)
     except Exception as e:
         raise HTTPException(400, f"JSONの取り込みに失敗しました: {e}")
-    return JSONResponse(result)
+    try:
+        # 磨き上げたJSONが契約（app/schemas.py）と合っているか検証する
+        return AnalysisResult.model_validate(result)
+    except ValidationError as e:
+        missing = "; ".join(
+            ".".join(str(p) for p in err["loc"]) + ": " + err["msg"]
+            for err in e.errors()[:5]
+        )
+        raise HTTPException(400, f"JSONの形式が解析結果の契約と一致しません: {missing}")
 
 
 def _job_dir(jid: str) -> Path:

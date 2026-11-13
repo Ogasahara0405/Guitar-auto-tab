@@ -2,6 +2,9 @@
 
 複数本指で同時に鳴っているノート（開始時刻がほぼ同じグループ）は、
 重複しない弦の組み合わせとしてまとめて割り当てる。
+ブリッジ側映像のピッキング位置（弦レーン）や、指板の黒丸マーカー
+から推定したフレット位置の手がかりがあれば、映像に忠実な割当を
+優先する（音声から自然に決まる割当と大きく矛盾する場合のみ音声側を採る）。
 """
 import itertools
 
@@ -13,6 +16,17 @@ MAX_FRET = 22
 
 # 同時発音とみなす開始時刻の誤差（秒）
 GROUP_TOL = 0.05
+
+# 映像の弦位置に沿う割当を許すコスト差（手がかり1つあたり）
+LANE_SLACK = 1.5
+# レーン間隔と弦間節のずれの重み（映像仮説の選択用）
+LANE_SPACING_W = 0.4
+# 映像のフレット位置推定（指板の黒丸マーカー）を許容する誤差（フレット数）
+FRET_TOL = 2
+# フレット位置に沿う割当を許すコスト差（手がかり1つあたり）
+# マーカー検出は物理配置で検証済みのため、大きなポジション移動が
+# 音声側のDPコストに跳ねても映像のフレット位置を優先できる余裕を取る
+FRET_SLACK = 3.5
 
 
 def candidates(midi: int, max_fret: int = MAX_FRET):
@@ -57,9 +71,20 @@ def _group_events(notes):
     return events
 
 
-def _event_placements(group):
-    """同時発音グループの割当候補: [(コスト, ((弦index, フレット), ...)), ...]"""
-    cands_list = [candidates(n["midi"]) for n in group]
+def _event_placements(group, restrict=None, fret_pref=None):
+    """同時発音グループの割当候補: [(コスト, ((弦index, フレット), ...)), ...]
+
+    restrict: 各ノートの弦index固定（None=自由）。映像の弦位置に沿わせるため。
+    fret_pref: 各ノートのフレット推定（None=自由）。指板の黒丸マーカー由来。
+    """
+    cands_list = []
+    for i, n in enumerate(group):
+        c = candidates(n["midi"])
+        if restrict is not None and restrict[i] is not None:
+            c = [x for x in c if x[0] == restrict[i]]
+        if fret_pref is not None and fret_pref[i] is not None:
+            c = [x for x in c if abs(x[1] - fret_pref[i]) <= FRET_TOL]
+        cands_list.append(c)
     if any(not c for c in cands_list):
         return []
     out = []
@@ -103,21 +128,16 @@ def _place_trans(p1, p2) -> float:
     return cost
 
 
-def assign_frets(notes):
-    """
-    notes: [{"start","end","midi"}] に "string"(6..1, 6=低音E) と "fret" を付与して返す。
-    開始時刻がほぼ同じノートは同時発音として、重複しない弦にまとめて割り当てる。
-    ギター音域外のノートは除去する。
-    """
-    events = _group_events([n for n in notes if candidates(n["midi"])])
-    if not events:
-        return []
-
-    placements = [_event_placements(g) for g in events]
-    events = [g for g, p in zip(events, placements) if p]
-    placements = [p for p in placements if p]
-    if not events:
-        return []
+def _solve(events, restrict=None, fret_pref=None):
+    """DPで割当を解く。戻り値 (総コスト, 割当済みノート)。割当不能なら None"""
+    placements = []
+    for i, g in enumerate(events):
+        r = restrict[i] if restrict is not None else None
+        f = fret_pref[i] if fret_pref is not None else None
+        p = _event_placements(g, r, f)
+        if not p:
+            return None
+        placements.append(p)
 
     n = len(events)
     inf = float("inf")
@@ -138,8 +158,9 @@ def assign_frets(notes):
                 prev[i][j] = arg
 
     if not dp[-1]:
-        return [n for g in events for n in g]
+        return None
 
+    total = float(min(dp[-1].values()))
     j = min(dp[-1], key=dp[-1].get)
     seq = [j]
     for i in range(n - 1, 0, -1):
@@ -151,7 +172,120 @@ def assign_frets(notes):
     for i, group in enumerate(events):
         _cost, combo = placements[i][seq[i]]
         for note, (s, f) in zip(group, combo):
-            note["string"] = 6 - s  # 表記は 6弦=6 / 1弦=1
-            note["fret"] = int(f)
-            out.append(note)
-    return sorted(out, key=lambda x: (x["start"], x["midi"]))
+            # 仮説の比較中に元ノートを汚さないよう複製に割り当てる
+            assigned = dict(note)
+            assigned["string"] = 6 - s  # 表記は 6弦=6 / 1弦=1
+            assigned["fret"] = int(f)
+            out.append(assigned)
+    return total, sorted(out, key=lambda x: (x["start"], x["midi"]))
+
+
+def _lane_restrictions(events, lane_hints):
+    """映像の弦レーンから「どの弦を弾いたか」の仮説を作る（上から順の並びは保つ）
+
+    レーンの並びと弦の並びは同じ向きに並ぶはずだが、どちらが1弦側かは
+    映像だけでは決められないため、両向きの仮説を間隔の自然さ順に返す。
+    """
+    hinted = []
+    for i, g in enumerate(events):
+        if len(g) != 1:
+            continue  # 同時発音は複数弦にまたがるためレーンの解釈が曖昧
+        h = lane_hints.get(round(float(g[0]["start"]), 3))
+        if h:
+            r, k = int(h[0]), int(h[1])
+            if 0 <= r < k and k >= 2:
+                hinted.append((i, r, k))
+    ranks = sorted({r for _, r, _ in hinted})
+    if len(ranks) < 2:
+        return []
+    k_max = max(k for _, _, k in hinted)
+
+    out = []
+    for flip in (False, True):
+        for combo in itertools.combinations(range(6), len(ranks)):
+            strings = list(reversed(combo)) if flip else list(combo)
+            # レーン間隔と弦間隔が揃う仮説を優先（映像の並びを忠実に再現）
+            mismatch = 0.0
+            for a in range(len(ranks) - 1):
+                dr = (ranks[a + 1] - ranks[a]) / max(k_max - 1, 1) * 5.0
+                ds = strings[a + 1] - strings[a]
+                mismatch += abs(ds - dr)
+            restrict = [[None] * len(g) for g in events]
+            for i, r, _k in hinted:
+                restrict[i][0] = strings[ranks.index(r)]
+            out.append((LANE_SPACING_W * mismatch, restrict))
+    out.sort(key=lambda x: x[0])
+    return [r for _m, r in out]
+
+
+def _fret_preferences(events, fret_hints):
+    """fret_hints（{開始時刻: フレット推定}）をイベント内のノート順のリストに変換"""
+    if not fret_hints:
+        return None
+    out = []
+    any_hint = False
+    for g in events:
+        row = []
+        for n in g:
+            h = fret_hints.get(round(float(n["start"]), 3))
+            fe = float(h) if h is not None else None
+            row.append(fe)
+            if fe is not None:
+                any_hint = True
+        out.append(row)
+    return out if any_hint else None
+
+
+def assign_frets(notes, lane_hints=None, fret_hints=None):
+    """
+    notes: [{"start","end","midi"}] に "string"(6..1, 6=低音E) と "fret" を付与して返す。
+    開始時刻がほぼ同じノートは同時発音として、重複しない弦にまとめて割り当てる。
+    ギター音域外のノートは除去する。
+
+    lane_hints: {開始時刻(秒): (映像の弦レーン 0..K-1, レーン数K)} を渡すと、
+    ブリッジ側映像のピッキング位置に沿う弦割当を優先する（映像に忠実なタブ）。
+    fret_hints: {開始時刻(秒): フレット番号} を渡すと、指板の黒丸マーカーから
+    推定したフレット位置（±FRET_TOL）に沿う割当を優先する。
+    音声から自然に決まる割当と大きく矛盾する場合は音声側を採る（安全側）。
+    """
+    events = _group_events([n for n in notes if candidates(n["midi"])])
+    if not events:
+        return []
+
+    best = _solve(events, None)
+    if best is None:
+        return [n for g in events for n in g]
+
+    fret_pref = _fret_preferences(events, fret_hints)
+
+    def try_hyps(hyps, pref):
+        """映像の仮説を受け入れる（音声の自然な割当 + 許容コスト以内のみ）"""
+        nonlocal best
+        for restrict in hyps:
+            cand = _solve(events, restrict, pref)
+            if cand is None:
+                continue
+            n_lane = (
+                sum(1 for ev in restrict for x in ev if x is not None) if restrict else 0
+            )
+            n_fret = (
+                sum(1 for ev in pref for x in ev if x is not None) if pref else 0
+            )
+            slack = LANE_SLACK * n_lane + FRET_SLACK * n_fret
+            if cand[0] <= best[0] + slack:
+                best = cand  # 最も整合的な映像の仮説を採用
+                return True
+        return False
+
+    if lane_hints:
+        hyps = _lane_restrictions(events, lane_hints)
+        # まず映像の弦位置＋フレット位置の両方で試し、合わなければ弦位置のみ
+        for pref in ((fret_pref, None) if fret_pref else (None,)):
+            if try_hyps(hyps, pref):
+                break
+            if pref is not fret_pref:
+                break
+    elif fret_pref:
+        try_hyps([None], fret_pref)
+
+    return best[1]

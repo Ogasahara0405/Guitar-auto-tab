@@ -1,6 +1,8 @@
 import type { AnalysisResult } from "./types";
 
-export type Mode = "melody" | "chords";
+/** メロディ/コードのモード（バックエンドの契約 app/schemas.py と同期） */
+export type Mode = AnalysisResult["meta"]["mode"];
+/** コード出力形式（リクエスト側の列挙。サーバーでも検証される） */
 export type ChordStyle = "chord" | "power";
 
 export interface AnalyzeParams {
