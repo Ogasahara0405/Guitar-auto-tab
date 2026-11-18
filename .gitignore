@@ -3,4 +3,4 @@ output/
 __pycache__/
 *.pyc
 tests/_debug_seg.py
-frontend/node_modules/
+node_modules/

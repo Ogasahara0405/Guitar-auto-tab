@@ -1,11 +1,9 @@
+# 採譜ワーカー（worker/ = DSP知覚層）の依存。
+# Webアプリ（UI/API/決定ロジック）の依存は web/package.json（Node.js）。
 numpy
 scipy
 librosa
 soundfile
-fastapi
-uvicorn
-python-multipart
-reportlab
 yt-dlp
 imageio-ffmpeg
 # （任意・推奨）音源分離 Demucs は README「音源分離 Demucs の導入」の手順で導入してください

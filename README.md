@@ -21,9 +21,9 @@ YouTube・音声/動画ファイルから**ギタータブ譜を自動生成**�
 ## 必要なもの
 
 - Windows（macOS/Linuxも可、要調整）
-- Python 3.12（`winget install Python.Python.3.12` で導入可）
+- Python 3.12（採譜ワーカー用。`winget install Python.Python.3.12` で導入可）
+- Node.js LTS（Webアプリ本体の実行・ビルド用）
 - ffmpeg は不要（pip の `imageio-ffmpeg` 同梱バイナリを使用）
-- Node.js LTS — **フロントエンドのビルド/改造時のみ**（ビルド済みUIが `app/static/dist/` にあれば不要）
 
 ## セットアップ
 
@@ -31,14 +31,8 @@ YouTube・音声/動画ファイルから**ギタータブ譜を自動生成**�
 cd Guitar-auto-tab
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-```
-
-フロントエンド（React + TypeScript）を改造する場合、または `app/static/dist/` が無い場合:
-
-```powershell
-cd frontend
+cd web
 npm install
-npm run build   # 成果物を app/static/dist/ に出力
 ```
 
 ### （推奨）音源分離 Demucs の導入 — 採譜精度が大きく向上します
@@ -57,19 +51,25 @@ npm run build   # 成果物を app/static/dist/ に出力
 run.bat
 ```
 
-または:
+または（手動）:
 
 ```powershell
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --port 8000
+cd web
+npm run build
+$env:GAT_ROOT = (Resolve-Path ..).Path        # output/ と .venv の基準（リポジトリルート）
+$env:GAT_PYTHON = "..\.venv\Scripts\python.exe"
+node .output\server\index.mjs                  # http://127.0.0.1:8000
 ```
 
-**サーバーの起動完了を確認してから**ブラウザが自動で開きます（`run.bat` 経由の場合）。手動起動時は <http://127.0.0.1:8000> を開いてください。
+`run.bat` 経由の場合、起動完了後にブラウザが自動で開きます。手動起動時は <http://127.0.0.1:8000> を開いてください（ポートは `PORT` 環境変数で変更可）。
 
-フロントエンド開発時はビルド不要の開発サーバーも使えます（APIは8000へプロキシ）:
+開発時はビルド不要の開発サーバーも使えます:
 
 ```powershell
-cd frontend
-npm run dev     # http://127.0.0.1:5173
+cd web
+$env:GAT_ROOT = (Resolve-Path ..).Path
+$env:GAT_PYTHON = "..\.venv\Scripts\python.exe"
+npm run dev     # http://localhost:3000
 ```
 
 ## 使い方
@@ -93,58 +93,57 @@ npm run dev     # http://127.0.0.1:5173
 ## 動作テスト
 
 ```powershell
-.\.venv\Scripts\python.exe tests\test_pipeline.py
+.\.venv\Scripts\python.exe tests\test_dsp.py   # DSP知覚層（採譜・音色・映像・ワーカーCLI）
+cd web
+npm test                                        # 決定ロジック・契約・パイプライン（vitest）
 ```
 
-既知のメロディ/コード/同時発音（ダブルストップ・オクターブ）/ミュート付きコードを合成して、採譜→タブ変換→フレーム抽出→PDF出力→JSON連携、映像動作に基づく選別（関係ない音の除去・弦位置の反映）、ポジションマーク（黒丸）からのフレット位置推定、ギター音色学習（6弦1F〜1弦22F）による無関係な音の除去、同時発音の押さえ方の物理制約（開放弦以外のフレット開き3以内・押さえられない同時発音は弱い声から除く）、と言語をまたぐAPI契約（OpenAPI）の同期までを検証します。
+- **Python側（`tests/test_dsp.py`）**: 既知のメロディ/同時発音（ダブルストップ・オクターブ）/ミュート付きコード/映像動作/指板マーカー（黒丸）を合成して、メロディ採譜、ギター音色学習（6弦1F〜1弦22F）による無関係な音の判定、フレーム抽出、ワーカーCLIのJSON契約までを検証
+- **TypeScript側（`web/tests/`）**: 弦/フレット割当（同時発音の押さえ方の物理制約＝開放弦以外のフレット開き3以内・押さえられない同時発音は弱い声から除く）、ボイシング、映像ゲート（関係ない音の除去・弦位置とフレット位置の反映）、ASCIIタブ、zod契約、ワーカーをスタブしたパイプライン（tone除去→割当→フレームリンク→PDF/TXT/JSON保存、磨き上げJSON取り込み）を検証
 
 ## 構成
 
 ```
-app/
-  main.py            # FastAPI（Web API + フロントエンド配信・API境界での契約検証）
-  schemas.py         # API契約（Pydantic）— 言語をまたぐ型の単一情報源
-  export_openapi.py  # OpenAPIスキーマの書き出し（frontend/openapi.json へ）
-  core/              # 採譜エンジン（Python・DSP系）
-    audio.py         # ffmpeg変換 / yt-dlp によるYouTube音声取得
-    video.py         # 映像フレーム抽出（ノート位置 ↔ ブリッジ側映像のリンク）
-    sep.py           # 音源分離（Demucs: ミックスからギター成分を抽出）
-    melody.py        # メロディ採譜（pyin + 多声音検出: ダブルストップ等・音での確認付き）
-    chords.py        # コード認識（CQTクロマ + テンプレート照合）+ ミュート弦の音声確認
-    tone.py          # ギター音色モデル（6弦1F〜1弦22Fの学習）→ 無関係な音の除去
-    tabassign.py     # ノート→弦/フレット割当（DP・同時発音は弦の重複なし＋開放弦除く開き3以内）
-    voicing.py       # コード→押さえ方（開放/バレエ/パワーコード・同じく開き3以内に制約）
-    grid.py          # タブ譜のグリッド配置計算
-    render.py        # ASCIIタブ出力
-    pdf.py           # PDF出力（reportlab・日本語対応）
-    pipeline.py      # 解析パイプライン統括
-  static/dist/       # フロントエンドのビルド成果物
-frontend/            # フロントエンド（React + TypeScript / Vite）
-  scripts/
-    gen-api-types.mjs # openapi.json → src/api-types.ts の型生成（外部パッケージ依存なし）
-  openapi.json       # APIスキーマ（app/schemas.py から生成。変更時はコミットする）
-  src/
-    App.tsx          # 状態管理・画面構成
-    api.ts           # 型付きAPIクライアント
-    types.ts         # analysis.json の型（api-types.ts の再エクスポート）
-    api-types.ts     # 生成物: API契約のTS型（手書き禁止・npm run gen:api）
-    components/      # プレイヤー / タブ譜SVG / フレームリンク / フォーム類
+worker/              # 採譜ワーカー（Python・DSP知覚層。CLIでJSONを返す）
+  __main__.py        # CLI: acquire（媒体取得）/ perceive（採譜・映像解析）/
+                     #      frames（フレーム抽出）/ verify-mutes（ミュート確認）
+  audio.py           # ffmpeg変換 / yt-dlp によるYouTube音声取得
+  sep.py             # 音源分離（Demucs: ミックスからギター成分を抽出）
+  melody.py          # メロディ採譜（pyin + 多声音検出: ダブルストップ等・音での確認付き）
+  chords.py          # コード認識（CQTクロマ + テンプレート照合）+ ミュート弦の音声確認
+  tone.py            # ギター音色モデル（6弦1F〜1弦22Fの学習）→ 音色スコアの算出
+  video.py           # 映像の知覚（フレーム抽出・演奏動作解析・指板マーカー校正）
+  tuning.py          # チューニング定数（開放弦MIDI・最大フレット）
+web/                 # Webアプリ（Nuxt 3 / Vue 3 / TypeScript）— UI + API + 決定ロジック
+  shared/
+    schema.ts        # 契約（zod）— API/ワーカー/analysis.json の単一情報源
+    events.ts        # ノートイベント共通処理（同時発音のグルーピング等）
+  server/
+    api/             # Nitro APIルート（/api/analyze /api/import /api/jobs/...）
+    core/
+      pipeline.ts    # 解析パイプライン統括（tone閾値・映像ゲート・割当・保存）
+      tabassign.ts   # ノート→弦/フレット割当（DP・開放弦除く開き3以内の制約）
+      voicing.ts     # コード→押さえ方（開放/バレエ/パワーコード・同じく開き3以内）
+      gate.ts        # 映像（演奏動作）に忠実なノート/コードの選別
+      grid.ts        # タブ譜のグリッド配置計算
+      render.ts      # ASCIIタブ出力
+      pdf.ts         # PDF出力（pdfkit・日本語フォント対応）
+    worker/client.ts # Pythonワーカーの実行（subprocess + JSON契約検証）
+  pages/ components/ composables/ utils/ assets/   # UI（Vue SFC）
+  tests/             # vitest（決定ロジック・契約・パイプライン）
+tests/test_dsp.py    # Pythonテスト（DSP知覚層）
 output/<id>/         # 解析結果（analysis.json / tab.txt / tab.pdf / frames/）
 ```
 
 ## 言語の使い分け
 
-「無理にPythonでまとめない」方針で、コンポーネントごとに**妥当性とデータのやり取りの滑らかさ**で言語を選ぶ:
+「無理に1言語へまとめない」方針で、コンポーネントごとに**妥当性とデータのやり取りの滑らかさ**で言語を選ぶ:
 
-- **採譜エンジン（DSP・音源分離）= Python** — librosa / numpy / Demucs の生態系が唯一揃う場所。ここをJava/PHPなどで書き直すと精度も無料維持も崩れるため、Pythonが妥当
-- **UI = React + TypeScript** — 動画同期プレイヤー・タブ譜描画など型のある対話UIはTSが妥当
-- **Java / PHP はこのアプリでは不採用** — DSPの主要処理を引き取れない上、ローカル個人利用へのランタイム負荷とプロセス境界の追加が「やり取りのスムーズさ」に反するため
-- **API境界 = 型契約の機械的な同期** — Python側とTS側で型定義を手書き二重管理しない。
-  `app/schemas.py`（Pydantic）→ OpenAPI → `frontend/src/api-types.ts` を自動生成。
-  APIの形式を変えたら:
-  1. `.\.venv\Scripts\python.exe app\export_openapi.py`（リポジトリルートで）
-  2. `npm run build`（`gen:api` がTS型を再生成。外部パッケージ不要の自前スクリプト）
-  3. `tests\test_pipeline.py` の `test_api_contract` がずれを検出する
+- **DSP知覚層（採譜・音源分離・映像解析）= Python（`worker/`）** — librosa / numpy / Demucs の生態系が唯一揃う場所。ここをTypeScript等で書き直すと精度も無料維持も崩れるため、Pythonが妥当
+- **決定ロジック・譜面描画・API・UI = TypeScript / Nuxt 3（`web/`）** — 弦/フレット割当（DP）、ボイシング、映像ゲート、タブ描画、PDF出力、画面を1言語へ集約。UI近傍のロジックの変更が1箇所で完結する
+- **Python↔TypeScript 境界 = JSON 契約** — `worker/` は CLI として呼ばれ、知覚結果の JSON を返す。型は `web/shared/schema.ts`（zod）が単一情報源で、ワーカー出力もAPI応答もここで検証する（手書き二重管理・コード生成の連鎖なし）
+  - API（analysis.json）の形式を変えたら: `web/shared/schema.ts` を書き換えて `npm run test`（`schema.spec` / `pipeline.spec` が契約を検証）
+  - ワーカーのJSON形式を変えたら: `web/shared/schema.ts` の `PerceptionResult` と `worker/__main__.py` を揃えて `tests\test_dsp.py` の `test_worker_cli` を実行
 
 ## 制限・既知の課題
 
