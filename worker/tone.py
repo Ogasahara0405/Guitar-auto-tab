@@ -23,7 +23,7 @@ import numpy as np
 
 from .tuning import MAX_FRET, TUNING_MIDI
 
-DATA_DIR = Path(__file__).resolve().parents[1] / "data"
+DATA_DIR = Path(__file__).resolve().parent / "data"
 MODEL_PATH = DATA_DIR / "guitar_tone_model.npz"
 
 NHARM = 16                       # 学習する倍音の本数

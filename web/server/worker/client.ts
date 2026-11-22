@@ -59,9 +59,9 @@ export const defaultRunner: WorkerRunner = (args, opts) =>
       }
     });
     if (opts.stdin !== undefined) {
-      proc.stdin.write(opts.stdin);
+      proc.stdin?.write(opts.stdin);
     }
-    proc.stdin.end();
+    proc.stdin?.end();
   });
 
 async function run<T>(

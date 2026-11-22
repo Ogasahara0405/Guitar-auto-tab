@@ -19,7 +19,8 @@ export type ArtifactName = "tab.pdf" | "tab.txt" | "analysis.json";
 
 async function apiCall<T>(url: string, opts?: Record<string, unknown>): Promise<T> {
   try {
-    return await $fetch<T>(url, opts);
+    // $fetch の型付きレスポンス（TypedInternalResponse）は任意の T と互換でないため明示的に断言する
+    return (await $fetch(url, opts)) as unknown as T;
   } catch (e: unknown) {
     const data = (e as { data?: { message?: string; statusMessage?: string } }).data;
     const msg = data?.message || data?.statusMessage;

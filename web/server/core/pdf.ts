@@ -58,10 +58,12 @@ export async function renderPdf(result: AnalysisBody, outPath: string): Promise<
   await new Promise<void>((resolvePromise, reject) => {
     const doc = new PDFDocument({ size: "A4", layout: "landscape", margin: 0 });
     const stream = createWriteStream(outPath);
-    doc.pipe(stream);
+    // PDFDocumentはReadableStreamだが型定義上は流儀が揃わないため明示的に扱う
+    const docStream = doc as unknown as NodeJS.ReadableStream;
+    docStream.pipe(stream);
     stream.on("finish", () => resolvePromise());
     stream.on("error", reject);
-    doc.on("error", reject);
+    docStream.on("error", reject);
 
     const font = pickFont(doc);
     const W = doc.page.width;
