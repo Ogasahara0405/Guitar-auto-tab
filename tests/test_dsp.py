@@ -371,7 +371,21 @@ def _run_worker(*args, stdin: str | None = None) -> dict:
         cwd=str(root), input=stdin, capture_output=True, text=True,
     )
     assert res.returncode == 0, f"worker {args[0]} が失敗: {res.stderr[-500:]}"
-    return json.loads(res.stdout.strip().splitlines()[-1])
+    # 結果JSONは __GAT_JSON__ マーカー行の後ろに置かれる（ノイズ耐性のため）。
+    # web/server/worker/client.ts の parseWorkerOutput と同じ規則で解析する
+    # （行頭アンカーで探すことで、JSONペイロード内に同文字列が含まれても誤検出しない）。
+    from worker.__main__ import JSON_MARKER
+
+    out = res.stdout
+    anchor = "\n" + JSON_MARKER
+    idx = out.rfind(anchor)
+    if idx >= 0:
+        line = out[idx + len(anchor):]
+    elif out.startswith(JSON_MARKER):
+        line = out[len(JSON_MARKER):]
+    else:
+        line = out.strip().splitlines()[-1]
+    return json.loads(line.split("\n", 1)[0].strip())
 
 
 def test_worker_cli():

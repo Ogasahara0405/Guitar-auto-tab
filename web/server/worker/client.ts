@@ -28,21 +28,53 @@ export type WorkerRunner = (
   opts: { root: string; python: string; stdin?: string },
 ) => Promise<unknown>;
 
-/** 既定の runner: python -m worker を起動し、最後の stdout 行を JSON として読む */
+/** worker の結果JSON行マーカー（worker/__main__.py の JSON_MARKER と一致させる） */
+const JSON_MARKER = "__GAT_JSON__";
+
+/**
+ * worker の stdout から結果 JSON を取り出す（worker/__main__.py の _dump と対）。
+ * - 行頭アンカー（"\n" + マーカー）で最後の出現を探す: JSON ペイロード内に
+ *   同じ文字列（例: 動画タイトル）が含まれても誤検出しない（json.dumps は
+ *   改行を出さないため本物のマーカー行は必ずアンカーに一致する）
+ * - マーカーが無ければ従来どおり最後の行を JSON として試す
+ * - マーカー直後の1行のみを渡し、後続ノイズに耐える
+ */
+export function parseWorkerOutput(out: string): unknown {
+  const anchor = "\n" + JSON_MARKER;
+  const idx = out.lastIndexOf(anchor);
+  let payload: string;
+  if (idx >= 0) {
+    payload = out.slice(idx + anchor.length);
+  } else if (out.startsWith(JSON_MARKER)) {
+    payload = out.slice(JSON_MARKER.length);
+  } else {
+    payload = out.trim().split("\n").pop() ?? "";
+  }
+  return JSON.parse(payload.split("\n", 1)[0].trim());
+}
+
+/**
+ * 既定の runner: python -m worker を起動し、stdout のマーカー行以降を JSON として読む。
+ * yt-dlp の進捗など改行なしのノイズが混ざっても壊れない。
+ * （UTF-8のマルチバイト境界でチャンク分割されても化けないよう、
+ *   Buffer を蓄積してから一括デコードする）
+ */
 export const defaultRunner: WorkerRunner = (args, opts) =>
   new Promise((resolvePromise, reject) => {
     const proc = spawn(opts.python, ["-m", "worker", ...args], {
       cwd: opts.root,
       env: { ...process.env, PYTHONIOENCODING: "utf-8" },
     });
-    let out = "";
-    let err = "";
-    proc.stdout.on("data", (d: Buffer) => (out += d.toString()));
-    proc.stderr.on("data", (d: Buffer) => (err += d.toString()));
+    const outChunks: Buffer[] = [];
+    const errChunks: Buffer[] = [];
+    proc.stdout.on("data", (d: Buffer) => outChunks.push(d));
+    proc.stderr.on("data", (d: Buffer) => errChunks.push(d));
     proc.on("error", (e) =>
       reject(new Error(`worker を起動できません（${opts.python}）: ${e.message}`)),
     );
     proc.on("close", (code) => {
+      const out = Buffer.concat(outChunks).toString("utf-8");
+      const err = Buffer.concat(errChunks).toString("utf-8");
       if (code !== 0) {
         reject(
           new Error(
@@ -51,11 +83,10 @@ export const defaultRunner: WorkerRunner = (args, opts) =>
         );
         return;
       }
-      const line = out.trim().split("\n").pop() ?? "";
       try {
-        resolvePromise(JSON.parse(line));
+        resolvePromise(parseWorkerOutput(out));
       } catch {
-        reject(new Error(`worker ${args[0]} のJSON出力を解釈できません: ${line.slice(0, 400)}`));
+        reject(new Error(`worker ${args[0]} のJSON出力を解釈できません: ${out.slice(-400)}`));
       }
     });
     if (opts.stdin !== undefined) {

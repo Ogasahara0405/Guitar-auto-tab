@@ -30,8 +30,10 @@ def ensure_wav(src: str, dst: str, sr: int = SR, channels: int = 1) -> str:
 def download_youtube(url: str, outdir: str):
     """yt-dlpでYouTubeの音声/映像を取得し、(wavパス, タイトル, 取得元ファイル)を返す
 
-    yt-dlpはダウンロードのみに使用（後処理にffmpeg/ffprobeを要求させない）。
-    wavへの変換はensure_wav（imageio-ffmpeg同梱ffmpeg）で行う。
+    映像+音声は同梱ffmpeg（imageio-ffmpeg）でマージして取得する。
+    現代のYouTubeには480p以下の「映像+音声の単一ファイル」が無く、
+    単一ファイル指定だと音声のみに落ちて映像機能（フレームリンク・
+    映像ゲート）が動かなくなるため、まず分離ストリームのマージを試す。
     映像付きで取得できる場合は動画も保持し、ブリッジ側の弦の確認用に
     ノート位置のフレームを切り出せるようにする（取得できない場合は音声のみ）。
     YouTube側の一時的な403（レート制限・PO Token等）に備え、
@@ -49,12 +51,18 @@ def download_youtube(url: str, outdir: str):
         if i:
             time.sleep(3.0)
         opts = {
-            # 映像+音声の単一ファイル（480p以下）を優先し、無ければ音声のみ
-            "format": "best[height<=480]/bestaudio/best",
+            # 映像(≤480p)+音声のマージ → 単一ファイル(≤480p) → 映像(任意)+音声のマージ → 音声のみ
+            # （480p以下の映像が無い動画でも、映像は無くさない）
+            "format": "bestvideo[height<=480]+bestaudio/best[height<=480]/bestvideo+bestaudio/bestaudio/best",
             "outtmpl": os.path.join(outdir, "source_dl.%(ext)s"),
             "quiet": True,
             "no_warnings": True,
+            # 進捗表示（[download] X%）は stdout に改行なしで出力され、
+            # CLI契約のJSONと同一行に混ざるため必ず抑止する
+            "noprogress": True,
             "noplaylist": True,
+            # マージ（+video+audio）に使うffmpeg（同梱バイナリ。システムffmpeg不要）
+            "ffmpeg_location": get_ffmpeg_exe(),
         }
         if client:
             opts["extractor_args"] = {"youtube": {"player_client": [client]}}

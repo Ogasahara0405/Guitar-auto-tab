@@ -23,9 +23,17 @@ import numpy as np
 
 from . import audio, chords, melody, sep, tone, video
 
+# CLI契約: 結果JSONはこのマーカーの後ろに1行で出力する（ノイズ耐性のため）
+JSON_MARKER = "__GAT_JSON__"
+
 
 def _dump(obj) -> None:
-    """NaN/Inf を含まない安全な JSON を stdout へ1行で出力する"""
+    """NaN/Inf を含まない安全な JSON を stdout へ出力する
+
+    他の出力（yt-dlp の進捗など）が改行なしで混ざっても壊れないよう、
+    専用マーカー行の後ろに JSON を1行で置いて flush する。
+    （クライアントは最後のマーカー以降を JSON として読む）
+    """
 
     def clean(o):
         if isinstance(o, float):
@@ -41,7 +49,7 @@ def _dump(obj) -> None:
             return v if math.isfinite(v) else None
         return o
 
-    print(json.dumps(clean(obj), ensure_ascii=False))
+    print("\n" + JSON_MARKER + json.dumps(clean(obj), ensure_ascii=False), flush=True)
 
 
 def _read_request(path: str):
