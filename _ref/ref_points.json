@@ -1,0 +1,452 @@
+[
+ {
+  "t": 12,
+  "notes": [
+   {
+    "string": 2,
+    "fret": 2
+   },
+   {
+    "string": 3,
+    "fret": 2
+   },
+   {
+    "string": 4,
+    "fret": 0
+   }
+  ]
+ },
+ {
+  "t": 18,
+  "notes": [
+   {
+    "string": 1,
+    "fret": 2
+   }
+  ]
+ },
+ {
+  "t": 26,
+  "notes": [
+   {
+    "string": 5,
+    "fret": 4
+   }
+  ]
+ },
+ {
+  "t": 30,
+  "notes": [
+   {
+    "string": 4,
+    "fret": 9
+   },
+   {
+    "string": 5,
+    "fret": 7
+   }
+  ]
+ },
+ {
+  "t": 32,
+  "notes": [
+   {
+    "string": 2,
+    "fret": 2
+   },
+   {
+    "string": 3,
+    "fret": 2
+   },
+   {
+    "string": 4,
+    "fret": 2
+   },
+   {
+    "string": 5,
+    "fret": 0
+   }
+  ]
+ },
+ {
+  "t": 42,
+  "notes": [
+   {
+    "string": 5,
+    "fret": 4
+   }
+  ]
+ },
+ {
+  "t": 46,
+  "notes": [
+   {
+    "string": 5,
+    "fret": 5
+   }
+  ]
+ },
+ {
+  "t": 48,
+  "notes": [
+   {
+    "string": 4,
+    "fret": 9
+   },
+   {
+    "string": 5,
+    "fret": 7
+   }
+  ]
+ },
+ {
+  "t": 52,
+  "notes": [
+   {
+    "string": 5,
+    "fret": 2
+   }
+  ]
+ },
+ {
+  "t": 80,
+  "notes": [
+   {
+    "string": 4,
+    "fret": 6
+   },
+   {
+    "string": 5,
+    "fret": 4
+   }
+  ]
+ },
+ {
+  "t": 86,
+  "notes": [
+   {
+    "string": 4,
+    "fret": 6
+   },
+   {
+    "string": 5,
+    "fret": 4
+   }
+  ]
+ },
+ {
+  "t": 94,
+  "notes": [
+   {
+    "string": 5,
+    "fret": 9
+   },
+   {
+    "string": 6,
+    "fret": 7
+   }
+  ]
+ },
+ {
+  "t": 108,
+  "notes": [
+   {
+    "string": 5,
+    "fret": 7
+   }
+  ]
+ },
+ {
+  "t": 112,
+  "notes": [
+   {
+    "string": 5,
+    "fret": 2
+   }
+  ]
+ },
+ {
+  "t": 116,
+  "notes": [
+   {
+    "string": 2,
+    "fret": 2
+   },
+   {
+    "string": 3,
+    "fret": 2
+   },
+   {
+    "string": 4,
+    "fret": 2
+   },
+   {
+    "string": 5,
+    "fret": 0
+   }
+  ]
+ },
+ {
+  "t": 124,
+  "notes": [
+   {
+    "string": 4,
+    "fret": 4
+   },
+   {
+    "string": 5,
+    "fret": 2
+   }
+  ]
+ },
+ {
+  "t": 128,
+  "notes": [
+   {
+    "string": 5,
+    "fret": 4
+   }
+  ]
+ },
+ {
+  "t": 130,
+  "notes": [
+   {
+    "string": 5,
+    "fret": 6
+   }
+  ]
+ },
+ {
+  "t": 132,
+  "notes": [
+   {
+    "string": 4,
+    "fret": 9
+   },
+   {
+    "string": 5,
+    "fret": 7
+   }
+  ]
+ },
+ {
+  "t": 134,
+  "notes": [
+   {
+    "string": 4,
+    "fret": 2
+   },
+   {
+    "string": 5,
+    "fret": 0
+   }
+  ]
+ },
+ {
+  "t": 136,
+  "notes": [
+   {
+    "string": 4,
+    "fret": 6
+   },
+   {
+    "string": 5,
+    "fret": 4
+   }
+  ]
+ },
+ {
+  "t": 150,
+  "notes": [
+   {
+    "string": 4,
+    "fret": 10
+   },
+   {
+    "string": 5,
+    "fret": 8
+   }
+  ]
+ },
+ {
+  "t": 166,
+  "notes": [
+   {
+    "string": 5,
+    "fret": 5
+   },
+   {
+    "string": 6,
+    "fret": 3
+   }
+  ]
+ },
+ {
+  "t": 174,
+  "notes": [
+   {
+    "string": 2,
+    "fret": 10
+   }
+  ]
+ },
+ {
+  "t": 176,
+  "notes": [
+   {
+    "string": 1,
+    "fret": 13
+   }
+  ]
+ },
+ {
+  "t": 180,
+  "notes": [
+   {
+    "string": 2,
+    "fret": 8
+   }
+  ]
+ },
+ {
+  "t": 182,
+  "notes": [
+   {
+    "string": 1,
+    "fret": 10
+   }
+  ]
+ },
+ {
+  "t": 184,
+  "notes": [
+   {
+    "string": 1,
+    "fret": 8
+   }
+  ]
+ },
+ {
+  "t": 186,
+  "notes": [
+   {
+    "string": 1,
+    "fret": 10
+   }
+  ]
+ },
+ {
+  "t": 198,
+  "notes": [
+   {
+    "string": 5,
+    "fret": 6
+   }
+  ]
+ },
+ {
+  "t": 200,
+  "notes": [
+   {
+    "string": 4,
+    "fret": 9
+   },
+   {
+    "string": 5,
+    "fret": 7
+   }
+  ]
+ },
+ {
+  "t": 202,
+  "notes": [
+   {
+    "string": 4,
+    "fret": 6
+   },
+   {
+    "string": 5,
+    "fret": 4
+   }
+  ]
+ },
+ {
+  "t": 204,
+  "notes": [
+   {
+    "string": 4,
+    "fret": 7
+   },
+   {
+    "string": 5,
+    "fret": 5
+   }
+  ]
+ },
+ {
+  "t": 216,
+  "notes": [
+   {
+    "string": 4,
+    "fret": 9
+   },
+   {
+    "string": 5,
+    "fret": 6
+   }
+  ]
+ },
+ {
+  "t": 220,
+  "notes": [
+   {
+    "string": 4,
+    "fret": 2
+   },
+   {
+    "string": 5,
+    "fret": 0
+   }
+  ]
+ },
+ {
+  "t": 222,
+  "notes": [
+   {
+    "string": 4,
+    "fret": 6
+   },
+   {
+    "string": 5,
+    "fret": 4
+   }
+  ]
+ },
+ {
+  "t": 234,
+  "notes": [
+   {
+    "string": 4,
+    "fret": 7
+   },
+   {
+    "string": 5,
+    "fret": 5
+   }
+  ]
+ },
+ {
+  "t": 236,
+  "notes": [
+   {
+    "string": 4,
+    "fret": 10
+   },
+   {
+    "string": 5,
+    "fret": 8
+   }
+  ]
+ }
+]

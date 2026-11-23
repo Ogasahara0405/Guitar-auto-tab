@@ -26,8 +26,8 @@ import { shapeFor } from "./voicing";
 import { renderPdf } from "./pdf";
 import { scoreToAscii } from "./render";
 
-/** ギターとみなす音色一致度の下限（旧 tone.py の TONE_MIN） */
-const TONE_MIN = 0.5;
+/** ギターとみなす音色一致度の下限（ミュート音を拾えるよう0.45に調整） */
+const TONE_MIN = 0.45;
 
 /** 旧 uuid4().hex[:8] と同じ 8桁のジョブID */
 function newJobId(): string {

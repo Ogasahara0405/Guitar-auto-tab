@@ -1,0 +1,59 @@
+=== #1 [minor] grid.ts
+place() の衝突繰り上げが最終スロットで飽和し、2イベントが同一スロットに重なってフレット数字が重畳する
+FIX: 繰り上げ先が最終スロットも満杯なら measures[mi].slots を拡張する、または満杯時は x を微小オフセットで重ねる（PDF/ASCII 同様のフォールバック）。最低限 tabLayout 側で同スロット衝突を検出して片方を右へずらす描画フォールバックを入れる。
+
+=== #2 [minor] tabLayout.ts
+perSystem の自動計算が measures[0] の幅だけを見ているため、弱起など幅の狭い先頭小節で段がコンテナ幅に収まらない
+FIX: 全小節幅の最大値または平均（例: Math.max(...measures.map(measureWidth))）で割るか、段組みを実際の累積幅が containerWidth-24 を超えるところで折り返す貪欲パッキングに変える。
+
+=== #3 [minor] TabViewer.vue
+ビームで結ばれた音符にもフラグが二重描画される（標準タブ譜ではビームがあればフラグは付けない）
+FIX: beamGroups の結果から「ビームに含まれるイベント index の Set」を作り、そのイベントの v-if="stemVisible(ev)" フラグ描画をスキップする（ビーム線のみ残す）。16分ビームの第2ビーム線（y をずらした平行ビーム）も標準に近づけるなら flagCount-1 本の平行ビームにするとよい。
+
+=== #4 [major] TabViewer.vue
+リセット時に active クラスが掃除されず、ノード再利用と相まって二重/残りハイライトが発生する
+FIX: setActive で最後に active を付けたノード集合（hl/text の Element 配列）をメンバに保持し、次の適用時に必ず明示的に remove("active") する。加えて rebuildCache の先頭で旧 evNodes 全ノードの "active" を除去する安全網を入れる（watch のリセット前に evNodes.get(activeIndex.value) をクリアするだけでも可）。
+
+=== #5 [minor] TabViewer.vue
+scrollIntoView({block:"nearest"}) がページ側までスクロールし、段変更のたびに画面がジャンプする
+FIX: scrollIntoView の代わりに内側コンテナの scrollTop を手動更新する（scrollEl.scrollTop += el.getBoundingClientRect().top - scrollEl.getBoundingClientRect().top など）。width 変更時は scrollTop を保持するか、変更前のアクティブ段位置に補正する。
+
+=== #6 [minor] TabViewer.vue
+カーソルの表示段と x 更新段がずれ、段境界でカーソルが一時的に凍結する
+FIX: 表示するカーソルの段も timeToX(t) の system 基準に統一する（tick 内で loc を先に求め、setActive の段引数に loc.system を使う、あるいは display 制御を tick 側に移す）。
+
+=== #7 [major] TabViewer.vue
+再生カーソルが休符中・曲頭で消える/凍る（setActive の早抜けで表示切替が起きない）
+FIX: カーソルの表示/x 更新を setActive から切り離し、tick() で `const loc = timeToX(t)` の結果から `cursorNodes` の該当行を表示・他を非表示にし x1/x2 を毎フレーム更新する（loc が null の時は直前の状態を保持）。setActive はフレット/背景の active クラス切替のみ担当する。
+
+=== #8 [minor] grid.ts
+コードの label 配置が place() を2回呼び1スロット占有し、コード交代が密なと配置・音価が歪む
+FIX: label はイベント配置の戻り値 [mi, slot] を再利用して同じスロットに置く（place() の2回目呼びをやめる）。画面用に score.labels を使う場合はイベントの label と同じ位置を使う。
+
+=== #9 [minor] TabViewer.vue
+拍子記号が弦名と重なる（両方 x≈2 に描画）
+FIX: 拍子記号の x を弦名の右（例: translate(16〜20, …)）に移すか、弦名をさらに左（x=0）に寄せ、譜線開始 x=12 の直前に拍子記号が来るよう調整する。
+
+=== #10 [minor] TabViewer.vue
+ビームで繋がる音符にフラグが二重描画される（標準記譜ではビーム時はフラグなし）
+FIX: ビームグループに属するイベントのフラグ描画をスキップする（beamsBySystem からイベント index の Set を作り、v-if でフラグを抑止）。孤立イベントにのみフラグを残す。
+
+=== #11 [minor] tabLayout.ts
+先頭小節が短い（ピックアップ）と slotsPerBeat の逆算がずれ、音価・ビーム判定全体が狂う
+FIX: grid.buildScore に採用した slotsPerBeat を Score に含めて返し、tabLayout と TabViewer はそれを使う。逆算を続ける場合は先頭の通常小節（slots が最大の小節等）を使うか、クランプ前の値で計算する。
+
+=== #12 [minor] TabViewer.vue
+段内の横方向カーソル追従が無く、システム幅が表示領域を超えるとカーソルが見切れる
+FIX: perSystem の見積もりを実測（各 measureWidth の累積＋padding）で行い、それでもはみ出す場合に備え、tick() でカーソル x が .tab-system / .tab-scroll の可視範囲外に出たら scrollLeft を微調整する。scrollIntoView は block:'nearest' のまま、対象を .tab-scroll 内に限定する（scrollEl.scrollTo を使う等）。
+
+rejected: 10
+- (rej) slotsPerBeat の復元式が grid.ts の Math.max(2,...) クランプで壊れ、全曲の音価・ビームが誤分類になる
+- (rej) コード（shape+label）が place() を2回呼び、コード名用にスロットを1つ奪って後続イベントが右へ累積ドリフトする
+- (rej) measureTimeOf が最終スロットを小節終端（=次小節の開始）に写像し、timeToX の逆写像が崩れて最終スロットのハイライトが一度も点灯しない
+- (rej) rhythmOf の whole 判定が4拍固定かつ拍子表示が "4/4" ハードコードで、3/4 等では全小節音にステムが付き拍子も誤表示になる
+- (rej) 停止中も rAF が回り続け、時刻不変でも毎フレーム setAttribute が走る
+- (rej) slotsPerBeat を measures[0] から逆算するため弱起小節で音価・ビームが全曲狂う（tabLayout との二重実装も不整合の元）
+- (rej) 同一 SVG 内の v-for キー 'bg' が重複（イベント背景 rect とビーム template）で再描画時に DOM が壊れ得る
+- (rej) アクティブ背景の意味が旧と異なる（休符中も点灯し続け、量子化スロット時刻で切替）
+- (rej) shape が空のコードは画面上のコード名表示が消える（score.labels を画面が未描画）
+- (rej) 機能回帰チェック（旧クラス互換・grid.ts 移動の import・clean.ts 影響）は問題なし

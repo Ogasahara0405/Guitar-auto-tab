@@ -1,7 +1,16 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { AnalysisResult } from "~/shared/schema";
-import { buildTabLayout, beamGroups, flagCount, SLOT_W, STAFF_GAP, TOP_PAD, type LayoutEvent } from "~/shared/tabLayout";
+import {
+  buildTabLayout,
+  beamGroups,
+  flagCount,
+  SLOT_W,
+  STAFF_GAP,
+  STAFF_LEFT,
+  TOP_PAD,
+  type LayoutEvent,
+} from "~/shared/tabLayout";
 import type { TimeSource } from "~/composables/useTimeSource";
 
 const props = defineProps<{
@@ -20,18 +29,22 @@ let resizeObs: ResizeObserver | null = null;
 const layout = computed(() =>
   buildTabLayout(props.result, { containerWidth: containerWidth.value }),
 );
-const slotsPerBeat = computed(() => {
-  const m = layout.value.score.measures[0];
-  const beatDur = 60 / (props.result.meta.tempo || 120);
-  return Math.max(1, Math.round(m.slots / Math.max((m.end - m.start) / beatDur, 1e-6)));
-});
 
 /** 段ごとのビーム単位（連続する同音価をつなぐ） */
 const beamsBySystem = computed(() =>
-  layout.value.systems.map((sys) => beamGroups(sys.events, slotsPerBeat.value)),
+  layout.value.systems.map((sys) => beamGroups(sys.events, layout.value.slotsPerBeat)),
 );
 
-/* ===== カーソル・ハイライト（変化時のみDOM操作 → カクつき防止） ===== */
+/** ビームで結ばれるイベント index（ビームがある音符にフラグは付けない＝標準記譜） */
+const beamedIndex = computed(() => {
+  const s = new Set<number>();
+  for (const groups of beamsBySystem.value) {
+    for (const g of groups) for (const ev of g) s.add(ev.index);
+  }
+  return s;
+});
+
+/* ===== ハイライト（変化時のみDOM操作 → カクつき防止） ===== */
 // ノード参照はレイアウト確定時に一度だけキャッシュし、毎フレームの走査を行わない
 interface EvNodes {
   hl: Element[];
@@ -40,7 +53,15 @@ interface EvNodes {
 const evNodes = new Map<number, EvNodes>();
 const cursorNodes = new Map<number, SVGLineElement>();
 
+function clearActiveClasses() {
+  for (const e of evNodes.values()) {
+    for (const el of e.hl) el.classList.remove("active");
+    for (const el of e.text) el.classList.remove("active");
+  }
+}
+
 function rebuildCache() {
+  clearActiveClasses(); // 安全網: 古いノードの残りハイライトを消す
   evNodes.clear();
   cursorNodes.clear();
   const root = scrollEl.value;
@@ -58,8 +79,8 @@ function rebuildCache() {
 }
 
 const activeIndex = ref(-1);
-const activeSystem = ref(-1);
 
+/** フレット/背景のハイライト切替のみ担当（カーソルは tick が管理する） */
 function setActive(next: number, nextSystem: number) {
   const prev = activeIndex.value;
   if (prev === next) return;
@@ -73,19 +94,20 @@ function setActive(next: number, nextSystem: number) {
   if (next >= 0) apply(next, true);
   activeIndex.value = next;
 
-  // カーソルはアクティブな段にのみ表示
-  for (const [si, line] of cursorNodes) {
-    line.style.display = si === nextSystem ? "" : "none";
-  }
-  if (nextSystem !== activeSystem.value) {
+  if (nextSystem >= 0 && nextSystem !== activeSystem.value) {
     activeSystem.value = nextSystem;
-    // 段が変わったらその段を表示域に（毎フレームではなく段の変わり目だけ）
-    if (nextSystem >= 0) {
-      const el = scrollEl.value?.querySelector<HTMLElement>(`[data-system="${nextSystem}"]`);
-      el?.scrollIntoView({ block: "nearest", behavior: "auto" });
+    // 段が変わったらその段を表示域に（コンテナ内のみ・ページは動かさない）
+    const sc = scrollEl.value;
+    const el = sc?.querySelector<HTMLElement>(`[data-system="${nextSystem}"]`);
+    if (sc && el) {
+      const r = el.getBoundingClientRect();
+      const sr = sc.getBoundingClientRect();
+      if (r.top < sr.top + 8) sc.scrollTop += r.top - sr.top - 8;
+      else if (r.bottom > sr.bottom - 8) sc.scrollTop += r.bottom - sr.bottom + 8;
     }
   }
 }
+const activeSystem = ref(-1);
 
 let raf = 0;
 function tick() {
@@ -100,13 +122,26 @@ function tick() {
   }
   setActive(idx, idx >= 0 ? evs[idx].system : activeSystem.value);
 
-  // カーソル位置（段内 x を時間補間で算出）
+  // カーソル表示/位置は timeToX 基準で毎フレーム更新（休符中も維持）
   const loc = layout.value.timeToX(t);
   if (loc) {
+    for (const [si, line] of cursorNodes) {
+      const show = si === loc.system;
+      if ((line.style.display === "none") === show) {
+        line.style.display = show ? "" : "none";
+      }
+    }
     const line = cursorNodes.get(loc.system);
     if (line) {
       line.setAttribute("x1", String(loc.x));
       line.setAttribute("x2", String(loc.x));
+    }
+    // 段内横方向の追従（カーソルが見えたらしくならないように）
+    const sc = scrollEl.value;
+    if (sc && loc.x - sc.scrollLeft > sc.clientWidth - 60) {
+      sc.scrollLeft = Math.max(0, loc.x - sc.clientWidth / 3);
+    } else if (sc && loc.x < sc.scrollLeft) {
+      sc.scrollLeft = Math.max(0, loc.x - 40);
     }
   }
   raf = requestAnimationFrame(tick);
@@ -135,6 +170,7 @@ onBeforeUnmount(() => {
 watch(
   () => [props.result.id, containerWidth.value],
   () => {
+    clearActiveClasses(); // リセット時の残りハイライトを防ぐ
     activeIndex.value = -1;
     activeSystem.value = -1;
     if (scrollEl.value) scrollEl.value.scrollTop = 0;
@@ -174,8 +210,8 @@ function stemVisible(ev: LayoutEvent): boolean {
             {{ m.index + 1 }}
           </text>
 
-          <!-- 拍子記号（先頭の段のみ・標準的な 4/4 表記） -->
-          <g v-if="si === 0" :transform="`translate(2, ${TOP_PAD - 8})`" class="timesig">
+          <!-- 拍子記号（先頭の段のみ・弦名と重ならないよう譜線の左に配置） -->
+          <g v-if="si === 0" :transform="`translate(15, ${TOP_PAD - 8})`" class="timesig">
             <text x="0" y="14" class="timesig-num">4</text>
             <text x="0" y="38" class="timesig-num">4</text>
           </g>
@@ -184,7 +220,7 @@ function stemVisible(ev: LayoutEvent): boolean {
           <line
             v-for="r in 6"
             :key="'st' + r"
-            :x1="12"
+            :x1="STAFF_LEFT"
             :y1="TOP_PAD + (r - 1) * STAFF_GAP"
             :x2="sys.width - 12"
             :y2="TOP_PAD + (r - 1) * STAFF_GAP"
@@ -245,18 +281,20 @@ function stemVisible(ev: LayoutEvent): boolean {
             {{ ev.label }}
           </text>
 
-          <!-- 音価ステム/フラグ（ビームは下端でつなぐ） -->
-          <template v-for="ev in sys.events" :key="'stem' + ev.index">
+          <!-- 音価ステム（whole 以外） -->
+          <line
+            v-for="ev in sys.events.filter((e) => stemVisible(e))"
+            :key="'stem' + ev.index"
+            :x1="ev.x + 8"
+            :y1="STAFF_BOTTOM + 4"
+            :x2="ev.x + 8"
+            :y2="STAFF_BOTTOM + 4 + STEM_LEN"
+            class="stem"
+          />
+          <!-- フラグ: ビームに属さない音符のみ（標準記譜ではビーム時はフラグなし） -->
+          <template v-for="ev in sys.events" :key="'flags' + ev.index">
             <line
-              v-if="stemVisible(ev)"
-              :x1="ev.x + 8"
-              :y1="STAFF_BOTTOM + 4"
-              :x2="ev.x + 8"
-              :y2="STAFF_BOTTOM + 4 + STEM_LEN"
-              class="stem"
-            />
-            <line
-              v-for="f in flagCount(ev.rhythm)"
+              v-for="f in beamedIndex.has(ev.index) ? [] : flagCount(ev.rhythm)"
               :key="'fl' + ev.index + '_' + f"
               :x1="ev.x + 8"
               :y1="STAFF_BOTTOM + 4 + STEM_LEN - (f - 1) * 6"
@@ -265,12 +303,15 @@ function stemVisible(ev: LayoutEvent): boolean {
               class="flag"
             />
           </template>
-          <template v-for="(group, gi) in beamsBySystem[si]" :key="'bg' + gi">
+          <!-- ビーム: 音価に応じた本数の平行ビーム -->
+          <template v-for="(group, gi) in beamsBySystem[si]" :key="'beamgrp' + gi">
             <line
+              v-for="b in flagCount(group[0].rhythm)"
+              :key="'beam' + gi + '_' + b"
               :x1="group[0].x + 8"
-              :y1="STAFF_BOTTOM + 4 + STEM_LEN"
+              :y1="STAFF_BOTTOM + 4 + STEM_LEN - (b - 1) * 5"
               :x2="group[group.length - 1].x + 8"
-              :y2="STAFF_BOTTOM + 4 + STEM_LEN"
+              :y2="STAFF_BOTTOM + 4 + STEM_LEN - (b - 1) * 5"
               class="beam"
             />
           </template>
@@ -301,13 +342,13 @@ function stemVisible(ev: LayoutEvent): boolean {
             </text>
           </template>
 
-          <!-- 再生カーソル（アクティブな段のみ表示） -->
+          <!-- 再生カーソル（tick が表示段と位置を更新） -->
           <line
             class="cursor"
             :data-cursor="si"
-            :x1="12"
+            :x1="STAFF_LEFT"
             :y1="TOP_PAD - 34"
-            :x2="12"
+            :x2="STAFF_LEFT"
             :y2="STAFF_BOTTOM + 42"
             style="display: none"
           />

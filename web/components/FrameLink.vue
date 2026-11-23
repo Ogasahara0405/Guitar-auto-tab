@@ -78,8 +78,12 @@ onMounted(() => {
       }
     }
     if (current.value?.frame !== cur?.frame) {
-      current.value = cur;
-      preloadNearby(t);
+      // 表示/非表示の断続を防ぐため、イベント間は直前のフレームを保持する
+      // （img と placeholder の入れ替わりで高さが変わり画面が上下するのを防ぐ）
+      if (cur) {
+        current.value = cur;
+        preloadNearby(t);
+      }
     }
   }, 160);
 });

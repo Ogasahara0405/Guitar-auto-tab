@@ -4,6 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { buildTabLayout, rhythmOf, flagCount, beamGroups, SLOT_W, type LayoutEvent } from "../shared/tabLayout";
+import { buildScore } from "../shared/grid";
 import { AnalysisBody } from "../shared/schema";
 
 const result = AnalysisBody.parse({
@@ -110,5 +111,38 @@ describe("beamGroups", () => {
       mk(2, 0, 2, 2, "quarter"), // フラグ無し
     ];
     expect(beamGroups(evs, 2)).toHaveLength(0);
+  });
+});
+
+describe("スロット飽和と slotsPerBeat（回帰テスト）", () => {
+  it("小節末に密集したイベントは同一スロットに重ならず小節が拡張される", () => {
+    // 2小節（各8スロット）に、小節末付近へ3音が密集する
+    const crowded = AnalysisBody.parse({
+      meta: { title: "t", duration: 4.0, tempo: 120.0, mode: "melody" },
+      notes: [
+        { start: 1.87, end: 1.93, midi: 60, string: 3, fret: 5 },
+        { start: 1.91, end: 1.95, midi: 62, string: 3, fret: 7 },
+        { start: 1.97, end: 2.0, midi: 64, string: 3, fret: 9 },
+        { start: 3.0, end: 3.5, midi: 60, string: 3, fret: 5 },
+      ],
+      chords: [],
+      beats: [0, 0.5, 1, 1.5, 2],
+      barlines: [0.0, 2.0, 4.0],
+    });
+    const score = buildScore(crowded);
+    const m0 = score.measures[0];
+    const slots = score.events.filter((e) => e.measure === 0).map((e) => e.slot);
+    // 同一スロットに2つ以上入らない（数字が完全重畳しない）
+    expect(new Set(slots).size).toBe(slots.length);
+    // 満杯時は小節が拡張される
+    expect(m0.slots).toBeGreaterThanOrEqual(9);
+  });
+
+  it("buildScore が採用した slotsPerBeat を返す（弱起小節でも音価計算が狂わない）", () => {
+    const score = buildScore(result);
+    // tempo 120・小節2秒 = 4拍 → 8スロット = 8分グリッド(2)
+    expect(score.slots_per_beat).toBe(2);
+    const layout = buildTabLayout(result, { measuresPerSystem: 4 });
+    expect(layout.slotsPerBeat).toBe(2);
   });
 });

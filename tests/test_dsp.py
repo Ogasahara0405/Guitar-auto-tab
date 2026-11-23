@@ -366,17 +366,21 @@ def test_chords_extract():
 
 def _run_worker(*args, stdin: str | None = None) -> dict:
     root = Path(__file__).resolve().parents[1]
+    # worker は常にUTF-8で出力するため、デコードを明示する（コンソールcp932依存の回避）
     res = subprocess.run(
         [sys.executable, "-m", "worker", *args],
-        cwd=str(root), input=stdin, capture_output=True, text=True,
+        cwd=str(root),
+        input=(stdin.encode("utf-8") if stdin is not None else None),
+        capture_output=True,
     )
-    assert res.returncode == 0, f"worker {args[0]} が失敗: {res.stderr[-500:]}"
+    out = res.stdout.decode("utf-8", errors="replace")
+    err = res.stderr.decode("utf-8", errors="replace")
+    assert res.returncode == 0, f"worker {args[0]} が失敗: {err[-500:]}"
     # 結果JSONは __GAT_JSON__ マーカー行の後ろに置かれる（ノイズ耐性のため）。
     # web/server/worker/client.ts の parseWorkerOutput と同じ規則で解析する
     # （行頭アンカーで探すことで、JSONペイロード内に同文字列が含まれても誤検出しない）。
     from worker.__main__ import JSON_MARKER
 
-    out = res.stdout
     anchor = "\n" + JSON_MARKER
     idx = out.rfind(anchor)
     if idx >= 0:
@@ -425,6 +429,12 @@ def test_worker_cli():
         sf.write(mute_wav, synth_chord([45, 52, 57], dur=1.5, strum=0.0), SR)
         mut = _run_worker("verify-mutes", "--audio", str(mute_wav), "--request", "-", stdin=req)
         assert mut.get("muted") == [[1, 2]], f"verify-mutes の結果が不正: {mut}"
+
+        # コンソールエンコード非依存（μ 等のcp932外の文字を含むタイトル）
+        tricky = Path(td) / "test_µ's_song.wav"
+        sf.write(tricky, synth_seq([45, 48]), SR)
+        acq2 = _run_worker("acquire", "--file", str(tricky), "--out", td)
+        assert "µ" in acq2["title"] or "μ" in acq2["title"], f"タイトルの特殊文字が化けた: {acq2}"
     print("test_worker_cli OK")
 
 

@@ -26,6 +26,14 @@ from . import audio, chords, melody, sep, tone, video
 # CLI契約: 結果JSONはこのマーカーの後ろに1行で出力する（ノイズ耐性のため）
 JSON_MARKER = "__GAT_JSON__"
 
+# コンソールの既定エンコード（Windowsのcp932等）に依存しないよう、
+# stdout/stderr を UTF-8 に固定する（タイトルの μ 等の文字で落ちないため）
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 
 def _dump(obj) -> None:
     """NaN/Inf を含まない安全な JSON を stdout へ出力する
@@ -49,7 +57,10 @@ def _dump(obj) -> None:
             return v if math.isfinite(v) else None
         return o
 
-    print("\n" + JSON_MARKER + json.dumps(clean(obj), ensure_ascii=False), flush=True)
+    # コンソールエンコードに依存しないようバイト列で直接書く（μ 等の文字対策）
+    payload = ("\n" + JSON_MARKER + json.dumps(clean(obj), ensure_ascii=False) + "\n").encode("utf-8")
+    sys.stdout.buffer.write(payload)
+    sys.stdout.buffer.flush()
 
 
 def _read_request(path: str):

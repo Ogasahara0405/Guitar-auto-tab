@@ -31,6 +31,8 @@ export interface Score {
   events: ScoreEvent[];
   labels: ScoreLabel[];
   slots_per_measure_max: number;
+  /** 1拍あたりのスロット数（音価計算の単位。buildScore が採用した実値） */
+  slots_per_beat: number;
 }
 
 /**
@@ -84,6 +86,12 @@ export function buildScore(result: AnalysisBody, slotsPerBeat?: number): Score {
     let slot = Math.round(pos * (m.slots - 1));
     slot = Math.max(0, Math.min(slot, m.slots - 1));
     while (occupied[mi].has(slot) && slot < m.slots - 1) slot += 1;
+    if (occupied[mi].has(slot)) {
+      // 最終スロットも満杯 → 小節を1スロット広げて重なりを防ぐ
+      // （数字が完全に重なって判読不能になるのを避ける）
+      m.slots += 1;
+      slot = m.slots - 1;
+    }
     occupied[mi].add(slot);
     return [mi, slot];
   };
@@ -102,17 +110,18 @@ export function buildScore(result: AnalysisBody, slotsPerBeat?: number): Score {
 
   for (const c of chords as ChordEvent[]) {
     const shape = c.shape || [];
+    // コード名は押さえ方と同じスロットに置く（place() の再呼び出しで
+    // スロットを余分に占有し、後続の配置を歪めないようにする）
+    const [mi, slot] = place(c.start);
     if (shape.length) {
       const cells: Record<number, string> = {};
       for (const st of shape) {
         const row = st.string - 1;
         if (0 <= row && row <= 5) cells[row] = String(Math.round(st.fret));
       }
-      const [mi, slot] = place(c.start);
       events.push({ measure: mi, slot, cells, label: c.label ?? null });
     }
     if (c.label && c.label !== "N.C.") {
-      const [mi, slot] = place(c.start);
       labels.push({ measure: mi, slot, text: c.label });
     }
   }
@@ -122,5 +131,6 @@ export function buildScore(result: AnalysisBody, slotsPerBeat?: number): Score {
     events,
     labels,
     slots_per_measure_max: Math.max(...measures.map((m) => m.slots)),
+    slots_per_beat: slotsPerBeat,
   };
 }

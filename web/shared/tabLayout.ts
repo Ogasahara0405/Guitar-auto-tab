@@ -13,6 +13,8 @@ import { buildScore, type Score, type ScoreEvent, type Measure } from "./grid";
 export const SLOT_W = 14;
 /** 譜線の間隔（px） */
 export const STAFF_GAP = 17;
+/** 譜線の左端（px）— 弦名（左）と拍子記号のための余白 */
+export const STAFF_LEFT = 34;
 /** スタッフ上端の余白（px、弦名・コード名用） */
 export const TOP_PAD = 56;
 /** スタッフ下端の余白（px、ステム/ビーム用） */
@@ -57,6 +59,8 @@ export interface TabLayout {
   systems: LayoutSystem[];
   /** すべてのイベント（時刻順） */
   events: LayoutEvent[];
+  /** 1拍あたりのスロット数（音価分類の単位） */
+  slotsPerBeat: number;
   /** 小節のスロット数から見た拍子（現状 4/4 表示） */
   timeSignature: string;
   systemHeight: number;
@@ -120,7 +124,8 @@ export function beamGroups(events: LayoutEvent[], slotsPerBeat: number): LayoutE
 
 /**
  * 解析結果を標準タブ譜レイアウトに変換する。
- * measuresPerSystem を省略すると containerWidth に収まるだけの小節を並べる。
+ * measuresPerSystem を省略すると containerWidth に収まる範囲で
+ * 小節を詰めて段を組む（小節幅は異なることがあるため累積幅で判定する）。
  */
 export function buildTabLayout(
   result: AnalysisBody,
@@ -128,18 +133,39 @@ export function buildTabLayout(
 ): TabLayout {
   const score = buildScore(result);
   const measures = score.measures;
-  const slotsPerBeat =
-    measures.length && result.notes.length
-      ? Math.round((measures[0].slots * 60) / ((measures[0].end - measures[0].start) * (result.meta.tempo || 120))) || 2
-      : 2;
+  // buildScore が採用した実値を使う（先頭小節が弱起でも音価計算が狂わない）
+  const slotsPerBeat = score.slots_per_beat || 2;
 
-  // 1段の小節数: 明示指定 or コンテナ幅に収まる数（既定4）
-  let perSystem = opts?.measuresPerSystem ?? 0;
-  if (!perSystem && opts?.containerWidth) {
-    perSystem = Math.max(1, Math.floor((opts.containerWidth - 24) / measureWidth(measures[0])));
-    perSystem = Math.min(perSystem, 8);
+  // 段（システム）の組み立て: 明示指定なら小節数固定、自動なら幅に収まる貪欲詰め
+  const sysOfMeasure: number[] = [];
+  const systems: LayoutSystem[] = [];
+  const limit = opts?.containerWidth ?? 0;
+  let x = STAFF_LEFT;
+  let current: LayoutSystem = { index: 0, measures: [], events: [], width: 0 };
+  const flush = () => {
+    if (current.measures.length) {
+      current.width = x + 12;
+      systems.push(current);
+      current = { index: systems.length, measures: [], events: [], width: 0 };
+      x = STAFF_LEFT;
+    }
+  };
+  for (let mi = 0; mi < measures.length; mi++) {
+    const w = measureWidth(measures[mi]);
+    const countLimit = opts?.measuresPerSystem ?? 0;
+    const widthLimit = limit > 0 && x + w + 12 > limit;
+    if (
+      (countLimit > 0 && current.measures.length >= countLimit) ||
+      (countLimit === 0 && limit > 0 && widthLimit && current.measures.length > 0) ||
+      (countLimit === 0 && limit === 0 && current.measures.length >= DEFAULT_MEASURES_PER_SYSTEM)
+    ) {
+      flush();
+    }
+    sysOfMeasure.push(systems.length);
+    current.measures.push({ index: mi, x, width: w, start: measures[mi].start, end: measures[mi].end });
+    x += w;
   }
-  if (!perSystem) perSystem = DEFAULT_MEASURES_PER_SYSTEM;
+  flush();
 
   // イベントを時刻順に（スロット順を保証）
   const sortedEvents = [...score.events].sort(
@@ -155,12 +181,14 @@ export function buildTabLayout(
     } else {
       slotsLen = Math.max(1, m.slots - ev.slot);
     }
-    return {
+    const sysIndex = sysOfMeasure[ev.measure];
+    const mEntry = systems[sysIndex].measures.find((mm) => mm.index === ev.measure)!;
+    const layoutEv: LayoutEvent = {
       index: i,
-      system: Math.floor(ev.measure / perSystem),
+      system: sysIndex,
       measure: ev.measure,
       slot: ev.slot,
-      x: 0,
+      x: mEntry.x + (ev.slot + 1.5) * SLOT_W,
       rows: Object.entries(ev.cells).map(([row, text]) => ({ row: Number(row), text })),
       label: ev.label,
       time: measureTimeOf(m, ev.slot),
@@ -169,34 +197,15 @@ export function buildTabLayout(
       start: m.start,
       end: m.end,
     };
+    systems[sysIndex].events.push(layoutEv);
+    return layoutEv;
   });
-
-  // システム（段）の組み立て
-  const systems: LayoutSystem[] = [];
-  for (let mi = 0; mi < measures.length; mi += perSystem) {
-    const chunk = measures.slice(mi, mi + perSystem);
-    const sysIndex = systems.length;
-    let x = 12; // 左余白（弦名）
-    const ms = chunk.map((m, k) => {
-      const entry = { index: mi + k, x, width: measureWidth(m), start: m.start, end: m.end };
-      x += entry.width;
-      return entry;
-    });
-    systems.push({ index: sysIndex, measures: ms, events: [], width: x + 12 });
-    for (const ev of events) {
-      if (ev.measure >= mi && ev.measure < mi + chunk.length) {
-        const local = ev.measure - mi;
-        // セル位置: 小節内 (slot+1.5)*SLOT_W（PDF/ASCIIと同じ規則）
-        ev.x = ms[local].x + (ev.slot + 1.5) * SLOT_W;
-        systems[sysIndex].events.push(ev);
-      }
-    }
-  }
 
   return {
     score,
     systems,
     events,
+    slotsPerBeat,
     timeSignature: "4/4",
     systemHeight: TOP_PAD + 5 * STAFF_GAP + BOTTOM_PAD,
     timeToX(t: number) {
@@ -204,10 +213,9 @@ export function buildTabLayout(
         const m = measures[mi];
         if (t >= m.start && t < m.end) {
           const pos = (t - m.start) / Math.max(m.end - m.start, 1e-6);
-          const sysIndex = Math.floor(mi / perSystem);
-          const local = mi - sysIndex * perSystem;
-          const mx = systems[sysIndex].measures[local].x;
-          return { system: sysIndex, x: mx + (pos * (m.slots - 1) + 1.5) * SLOT_W };
+          const sysIndex = sysOfMeasure[mi];
+          const mEntry = systems[sysIndex].measures.find((mm) => mm.index === mi)!;
+          return { system: sysIndex, x: mEntry.x + (pos * (m.slots - 1) + 1.5) * SLOT_W };
         }
       }
       return null;

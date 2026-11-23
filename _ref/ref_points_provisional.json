@@ -1,0 +1,9 @@
+[
+  {"t": 30, "notes": [{"string": 5, "fret": 2}, {"string": 4, "fret": 4}], "note": "P.M.リフの2音(4/2)・tf_0016"},
+  {"t": 40, "notes": [{"string": 5, "fret": 2}, {"string": 4, "fret": 4}], "note": "同リフ・tf_0021"},
+  {"t": 72, "notes": [{"string": 5, "fret": 4}, {"string": 4, "fret": 6}], "note": "ダブルストップ(6/4)・tf_0037"},
+  {"t": 106, "notes": [], "note": "休符区間・tf_0053"},
+  {"t": 118, "notes": [{"string": 5, "fret": 7}, {"string": 4, "fret": 9}], "note": "P.M.リフ(9/7)・tf_0060"},
+  {"t": 168, "notes": [{"string": 2, "fret": 8}], "note": "高音メロディ 8(sl.)・tf_0085"},
+  {"t": 232, "notes": [{"string": 5, "fret": 0}], "note": "開放弦付近・tf_0117"}
+]

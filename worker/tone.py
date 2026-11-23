@@ -28,7 +28,11 @@ MODEL_PATH = DATA_DIR / "guitar_tone_model.npz"
 
 NHARM = 16                       # 学習する倍音の本数
 VARIANTS = (0.75, 0.9, 1.05, 1.25, 1.5)  # ピッキングの明るさ違い（学習データの幅）
-MODEL_VERSION = 2
+# パームミュート等の「減衰が速く高次倍音が少ない」音のバリアント
+# （ミュートした実音は通常弾きより倍音が早く落ちる）
+MUTE_VARIANTS = (0.45, 0.6, 0.72)
+MUTE_P_EXTRA = 0.45              # ミュート時は倍音減衰指数をさらに深くする
+MODEL_VERSION = 3
 
 MIN_SEGMENT = 0.12               # これ未満のノートは判定材料不足として除去しない（秒）
 MAX_SEGMENT = 0.6                # 判定に使う区間の上限（秒）
@@ -50,7 +54,7 @@ def _pickup_gain(f) -> np.ndarray:
     return g
 
 
-def _template_profile(f0: float, string_idx: int, fret: int, beta: float) -> np.ndarray:
+def _template_profile(f0: float, string_idx: int, fret: int, beta: float, mute: bool = False) -> np.ndarray:
     """1ポジションの倍音プロファイル（L2正規化）"""
     ks = np.arange(1, NHARM + 1, dtype=float)
     if string_idx <= 3:   # 6弦〜3弦: 巻き線（暗い）
@@ -58,6 +62,8 @@ def _template_profile(f0: float, string_idx: int, fret: int, beta: float) -> np.
     else:                 # 2弦・1弦: プレーン（明るい）
         p = 0.98
     p -= 0.006 * fret     # フレットが高いほど単弦が短く、やや明るい
+    if mute:              # パームミュート等: 高次倍音がさらに早く落ちる
+        p += MUTE_P_EXTRA
     a = ks ** (-p) * (beta ** (ks - 1)) * _pickup_gain(ks * f0)
     return a / float(np.sqrt((a * a).sum()))
 
@@ -74,6 +80,11 @@ def build_model() -> dict:
                 strs.append(6 - si)  # 表記は 6弦=6 / 1弦=1
                 frets.append(fret)
                 harms.append(_template_profile(f0, si, fret, beta))
+            for beta in MUTE_VARIANTS:  # パームミュート等の減衰の速い音
+                mids.append(midi)
+                strs.append(6 - si)
+                frets.append(fret)
+                harms.append(_template_profile(f0, si, fret, beta, mute=True))
     model = {
         "midi": np.array(mids, dtype=np.int32),
         "string": np.array(strs, dtype=np.int32),
