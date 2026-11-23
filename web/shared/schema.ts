@@ -56,6 +56,9 @@ export const AnalysisMeta = contract({
   separated: z.boolean().nullable().default(null).describe("Demucsによる音源分離を使った場合 true"),
   video_frames: z.number().int().nullable().default(null),
   tone_dropped: z.number().int().nullable().default(null),
+  clean_dropped: z.number().int().nullable().default(null).describe(
+    "不要音クリーニング（断片・弱い短音・根拠の弱い副次声）で除いたノート数",
+  ),
   source_job: z.string().nullable().default(null).describe("磨き上げ元ジョブID（フレーム引き継ぎ用）"),
   generated: z.string().nullable().default(null),
   media_file: z.string().nullable().default(null).describe("ブラウザ再生用の元メディア（ファイル入力時のみ）"),

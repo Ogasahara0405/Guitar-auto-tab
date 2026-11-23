@@ -19,6 +19,7 @@ import {
   type NoteEvent,
 } from "../../shared/schema";
 import { acquire, extractFrames, perceive, verifyMutes, type WorkerCtx } from "../worker/client";
+import { cleanMelodyNotes } from "./clean";
 import { gateChords, gateNotes } from "./gate";
 import { assignFrets, type RawNote } from "./tabassign";
 import { shapeFor } from "./voicing";
@@ -94,13 +95,17 @@ export async function analyze(ctx: WorkerCtx, params: AnalyzeParams): Promise<An
   let notes: NoteEvent[] = [];
   let chords: ChordEvent[] = [];
   let toneDropped: number | null = null;
+  let cleanDropped: number | null = null;
 
   if (params.mode === "melody") {
     // ギター音色モデルで無関係な音を除去（スコア未満を落とす）
     const keptByTone = perc.notes.filter((n) => n.tone >= TONE_MIN);
     toneDropped = perc.notes.length - keptByTone.length;
+    // 不要音クリーニング（断片・弱い短音・根拠の弱い副次声を落とす）
+    const [cleaned, d] = cleanMelodyNotes(keptByTone);
+    cleanDropped = d;
     // 映像（演奏動作）に忠実に選別し、弦/フレットを割り当てる
-    const gated = gateNotes(keptByTone, perc.play);
+    const gated = gateNotes(cleaned, perc.play);
     const assigned = assignFrets(gated.notes as RawNote[], gated.laneHints, gated.fretHints);
     notes = assigned.map((n) => ({
       start: n.start,
@@ -175,6 +180,7 @@ export async function analyze(ctx: WorkerCtx, params: AnalyzeParams): Promise<An
       separated: perc.separated,
       video_frames: linked ? Object.keys(frames).length : null,
       tone_dropped: toneDropped,
+      clean_dropped: cleanDropped,
       source_job: null,
       generated: new Date().toISOString().slice(0, 19),
       media_file: params.source.kind === "file" ? acq.media : null,

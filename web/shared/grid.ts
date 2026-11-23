@@ -3,8 +3,8 @@
  *
  * 旧: app/core/grid.py を移植。
  */
-import type { AnalysisBody, ChordEvent, NoteEvent } from "../../shared/schema";
-import { groupByStart } from "../../shared/events";
+import type { AnalysisBody, ChordEvent, NoteEvent } from "./schema";
+import { groupByStart } from "./events";
 
 export interface Measure {
   start: number;

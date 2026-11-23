@@ -4,7 +4,7 @@
  * 旧: app/core/render.py を移植。
  */
 import type { AnalysisBody } from "../../shared/schema";
-import { buildScore } from "./grid";
+import { buildScore } from "../../shared/grid";
 
 const STRING_NAMES = ["e", "B", "G", "D", "A", "E"]; // 上から1弦..6弦
 const CELL_W = 4;

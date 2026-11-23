@@ -3,7 +3,7 @@
  * 旧: tests/test_pipeline.py の test_ascii_render を移植。
  */
 import { describe, expect, it } from "vitest";
-import { buildScore } from "../server/core/grid";
+import { buildScore } from "../shared/grid";
 import { scoreToAscii } from "../server/core/render";
 import { AnalysisBody } from "../shared/schema";
 

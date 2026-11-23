@@ -131,12 +131,20 @@ button:disabled { opacity: 0.5; cursor: wait; }
 .spacer { flex: 1; }
 
 .tab-scroll {
-  overflow-x: auto;
+  overflow: auto;
+  max-height: 68vh;
   background: var(--panel2);
   border: 1px solid #2f3b4f;
   border-radius: 10px;
   padding: 8px;
 }
+.tab-systems {
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+  min-width: fit-content;
+}
+.tab-system { overflow-x: auto; }
 .tab-svg { display: block; }
 
 .tab-svg .staff { stroke: var(--staff); stroke-width: 1.1; }
@@ -147,7 +155,18 @@ button:disabled { opacity: 0.5; cursor: wait; }
   font-size: 15px;
   font-weight: 600;
 }
+.tab-svg .fret.active { fill: var(--accent); }
 .tab-svg .sname { fill: var(--sub); font-size: 12px; }
+.tab-svg .barnum { fill: var(--sub); font-size: 10px; opacity: 0.7; }
+.tab-svg .timesig-num {
+  fill: var(--text);
+  font-family: "Segoe UI", sans-serif;
+  font-size: 19px;
+  font-weight: 700;
+}
+.tab-svg .stem { stroke: var(--text); stroke-width: 1.4; }
+.tab-svg .flag { stroke: var(--text); stroke-width: 1.6; stroke-linecap: round; }
+.tab-svg .beam { stroke: var(--text); stroke-width: 3.2; stroke-linecap: round; }
 .tab-svg .chlabel {
   fill: var(--accent2);
   font-size: 15px;
@@ -156,7 +175,7 @@ button:disabled { opacity: 0.5; cursor: wait; }
 }
 .tab-svg .cursor { stroke: var(--accent); stroke-width: 2; }
 .tab-svg .ev { fill: transparent; transition: fill 0.08s linear; }
-.tab-svg .ev.active { fill: rgba(77, 163, 255, 0.22); }
+.tab-svg .ev.active { fill: rgba(77, 163, 255, 0.18); }
 .tab-svg .evrow { fill: transparent; transition: fill 0.08s linear; }
 .tab-svg .evrow.active { fill: rgba(255, 180, 84, 0.35); }
 

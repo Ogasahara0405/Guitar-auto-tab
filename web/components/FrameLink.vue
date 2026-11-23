@@ -56,6 +56,17 @@ const entries = computed<FrameEntry[]>(() => {
 const current = ref<FrameEntry | null>(null);
 let timer = 0;
 
+/** 再生中のフレーム切替を軽くするため、近くのフレーム画像を先読みする */
+function preloadNearby(t: number) {
+  const list = entries.value;
+  let i = list.findIndex((e) => e.end + 0.4 > t);
+  if (i < 0) return;
+  for (let k = i; k < Math.min(i + 3, list.length); k++) {
+    const img = new Image();
+    img.src = frameUrl(props.result.id, list[k].frame);
+  }
+}
+
 onMounted(() => {
   timer = window.setInterval(() => {
     const t = props.timeSource.current?.() ?? 0;
@@ -66,7 +77,10 @@ onMounted(() => {
         if (t < e.end) break;
       }
     }
-    if (current.value?.frame !== cur?.frame) current.value = cur;
+    if (current.value?.frame !== cur?.frame) {
+      current.value = cur;
+      preloadNearby(t);
+    }
   }, 160);
 });
 
@@ -96,7 +110,6 @@ const caption = computed(() => {
     <div class="frame-img">
       <img
         v-if="current"
-        :key="current.frame"
         :src="frameUrl(result.id, current.frame)"
         :alt="`映像フレーム ${current.start.toFixed(2)}秒`"
       />

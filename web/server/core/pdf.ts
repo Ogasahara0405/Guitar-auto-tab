@@ -8,7 +8,7 @@
 import { createWriteStream } from "node:fs";
 import PDFDocument from "pdfkit";
 import type { AnalysisBody } from "../../shared/schema";
-import { buildScore, type Measure } from "./grid";
+import { buildScore, type Measure } from "../../shared/grid";
 
 const MM = 72 / 25.4; // 1mm = 2.8346pt
 const STAFF_GAP = 3.2 * MM;
