@@ -7,7 +7,7 @@ import type { AnalysisBody } from "../../shared/schema";
 import { buildScore } from "../../shared/grid";
 
 const STRING_NAMES = ["e", "B", "G", "D", "A", "E"]; // 上から1弦..6弦
-const CELL_W = 4;
+const CELL_W = 6; // "12b14~" 等のベンド表記が収まる幅
 const MEASURES_PER_LINE = 4;
 
 export function scoreToAscii(result: AnalysisBody): string {

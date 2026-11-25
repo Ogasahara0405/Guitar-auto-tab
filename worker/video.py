@@ -109,7 +109,12 @@ def analyze_play(src: str, fps: int = MOTION_FPS) -> dict | None:
     neck = None
     if fmap:
         kx = MOTION_W / float(fmap["w"])
-        neck = ((fmap["a"] - NECK_PAD * fmap["b"]) * kx, (fmap["a"] + NECK_FRAC * fmap["b"]) * kx)
+        # 指板軸（斜めでも可）上のネック領域を x 範囲に変換する
+        u0 = fmap["a"] - NECK_PAD * fmap["b"]
+        u1 = fmap["a"] + NECK_FRAC * fmap["b"]
+        x0 = fmap["cx"] + fmap["dx"] * u0
+        x1 = fmap["cx"] + fmap["dx"] * u1
+        neck = (min(x0, x1) * kx, max(x0, x1) * kx)
     ff = audio.get_ffmpeg_exe()
     cmd = [
         ff, "-i", src,
@@ -127,6 +132,7 @@ def analyze_play(src: str, fps: int = MOTION_FPS) -> dict | None:
     ys: list = []
     widths: list = []
     neck_xs: list = []
+    neck_ys: list = []
     row_hist = np.zeros(MOTION_H, dtype=np.float64)
     prev = None
     i = 0
@@ -142,8 +148,9 @@ def analyze_play(src: str, fps: int = MOTION_FPS) -> dict | None:
                 act = d > thr
                 rows = act.sum(axis=1).astype(float)  # 行ごとの動きの量
                 n_act = int(act.sum())
-                # ネック側の動き（押弦中の左手）の横位置 = 何フレットあたりかの手がかり
+                # ネック側の動き（押弦中の左手）の位置 = 何フレットあたりかの手がかり
                 x_neck = float("nan")
+                y_neck = float("nan")
                 if neck is not None and n_act:
                     xi0 = max(int(neck[0]), 0)
                     xi1 = min(int(neck[1]) + 1, MOTION_W)
@@ -152,6 +159,8 @@ def analyze_play(src: str, fps: int = MOTION_FPS) -> dict | None:
                         if int(sub.sum()) >= 8:
                             col = sub.sum(axis=0).astype(float)
                             x_neck = float((col * np.arange(xi0, xi1)).sum() / col.sum())
+                            row = sub.sum(axis=1).astype(float)
+                            y_neck = float((row * np.arange(MOTION_H)).sum() / row.sum())
                 if n_act:
                     row_hist += rows
                     total = float(rows.sum())
@@ -167,6 +176,7 @@ def analyze_play(src: str, fps: int = MOTION_FPS) -> dict | None:
                 ys.append(y_c)
                 widths.append(width)
                 neck_xs.append(x_neck)
+                neck_ys.append(y_neck)
             prev = frame
             i += 1
     finally:
@@ -225,6 +235,7 @@ def analyze_play(src: str, fps: int = MOTION_FPS) -> dict | None:
         "band": band,
         "p90": p90,
         "neck_xs": [float(v) for v in neck_xs],
+        "neck_ys": [float(v) for v in neck_ys],
         "fret_map": fmap,
     }
 
@@ -305,57 +316,86 @@ def _detect_dots(gray) -> list:
 
 
 def _fit_fret_map(dots: list) -> dict | None:
-    """黒丸の画素位置からナット位置 a・スケール長 b（ピクセル）を推定する。
+    """黒丸の画素位置から指板の軸（斜めのネックでも可）とナット位置 a・スケール長 b を推定する。
 
-    モデル: フレット n の画素位置 x(n) = a + b * (1 - 2^(-n/12))
+    モデル: 指板軸上の座標 u(n) = a + b * (1 - 2^(-n/12))
     （フレットが高くなるほど間隔が 2^(-n/12) で詰まるギターの物理配置）
+    黒丸はネック上にほぼ一直線に並ぶため、まず主成分分析で指板軸（単位ベクトル
+    dx,dy）と原点（重心 cx,cy）を決め、軸に投影した1次元座標 u で格子当てを行う。
+    水平なネックでは軸が水平になり、従来の x 座標フィットに一致する。
     2つの黒丸がどのフレットのマークかの組み合わせを仮定して候補を作り、
     その格子に乗る黒丸の数（インライア）が最大のものを最小二乗で採る。
     """
     if len(dots) < MARKER_MIN_DOTS:
         return None
+    # 黒丸はネック上（画面上部側）にある。画面下のタブ表示領域など
+    # 他の暗い領域を誤検出した場合は候補から外す
     pts = sorted(((float(x), float(y)) for x, y, _ in dots), key=lambda p: p[0])[:12]
+    pts = [(x, y) for x, y in pts if y < 200.0]
+    if len(pts) < MARKER_MIN_DOTS:
+        return None
+    xy = np.array([[x, y] for x, y in pts], dtype=float)
+    # 指板軸: 重心まわりの主成分（分散最大方向 = ネックの向き）
+    c = xy.mean(axis=0)
+    cov = np.cov((xy - c).T)
+    eigvals, eigvecs = np.linalg.eigh(cov)
+    d = eigvecs[:, int(np.argmax(eigvals))]
+    if d[0] < 0:
+        d = -d  # ナット側（x 小さい）を正の向きに揃える
+    u_pts = (xy - c) @ d  # 軸に投影した1次元座標
+    # 物理的妥当性: ネック軸がほぼ垂直（誤検出ドットの直線配列など）の場合は棄却する
+    if abs(float(d[1])) > 0.85:
+        return None
     us = {n: _scale_u(n) for n in MARKER_FRETS}
 
     def fit(a: float, b: float):
-        if abs(b) < 30.0:
+        if b < 30.0:  # スケール長は正（軸の向きはフレットが増える向き）
             return None
         inliers = []
-        for x, _y in pts:
+        for k, u in enumerate(u_pts):
             best_d, best_n = None, None
-            for n, u in us.items():
-                d = abs(x - (a + b * u))
-                if best_d is None or d < best_d:
-                    best_d, best_n = d, n
+            for n, uu in us.items():
+                dd = abs(u - (a + b * uu))
+                if best_d is None or dd < best_d:
+                    best_d, best_n = dd, n
             if best_d <= DOT_FIT_TOL:
-                inliers.append((x, best_n))
+                inliers.append((float(u), best_n))
         if len(inliers) < MARKER_MIN_DOTS:
             return None
-        A = np.array([[1.0, us[n]] for _x, n in inliers])
-        xv = np.array([x for x, _n in inliers])
-        sol, *_ = np.linalg.lstsq(A, xv, rcond=None)
+        A = np.array([[1.0, us[n]] for _u, n in inliers])
+        uv = np.array([u for u, _n in inliers])
+        sol, *_ = np.linalg.lstsq(A, uv, rcond=None)
         a2, b2 = float(sol[0]), float(sol[1])
-        if abs(b2) < 30.0:
+        if b2 < 30.0:
             return None
-        resid = float(np.mean([abs(x - (a2 + b2 * us[n])) for x, n in inliers]))
+        resid = float(np.mean([abs(u - (a2 + b2 * us[n])) for u, n in inliers]))
         if resid > DOT_FIT_TOL:
             return None
-        return {"a": a2, "b": b2, "inliers": len(inliers), "residual": round(resid, 3)}
+        return {
+            "a": a2,
+            "b": b2,
+            "cx": float(c[0]),
+            "cy": float(c[1]),
+            "dx": float(d[0]),
+            "dy": float(d[1]),
+            "inliers": len(inliers),
+            "residual": round(resid, 3),
+        }
 
     best = None
     for i in range(len(pts)):
         for j in range(i + 1, len(pts)):
-            dx = pts[j][0] - pts[i][0]
-            if abs(dx) < 1e-6:
+            du = float(u_pts[j] - u_pts[i])
+            if abs(du) < 1e-6:
                 continue
             for f1 in MARKER_FRETS:
                 for f2 in MARKER_FRETS:
                     if f1 == f2:
                         continue
-                    b = dx / (us[f2] - us[f1])
-                    if abs(b) < 30.0:
+                    b = du / (us[f2] - us[f1])
+                    if b < 30.0:  # スケール長は正（フレットが増える向きに軸を取る）
                         continue
-                    r = fit(pts[i][0] - b * us[f1], b)
+                    r = fit(float(u_pts[i]) - b * us[f1], b)
                     if r and (
                         best is None
                         or (r["inliers"], -r["residual"]) > (best["inliers"], -best["residual"])
@@ -391,5 +431,6 @@ def analyze_fret_map(src: str) -> dict | None:
             or (fmap["inliers"], -fmap["residual"]) > (best["inliers"], -best["residual"])
         ):
             fmap["w"] = int(gray.shape[1])
+            fmap["h"] = int(gray.shape[0])
             best = fmap
     return best

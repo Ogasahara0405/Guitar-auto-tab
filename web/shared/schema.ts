@@ -35,6 +35,8 @@ export const NoteEvent = contract({
   fret: z.number().int().nullable().default(null).describe("フレット番号"),
   evidence: z.number().nullable().default(null).describe("採譜の音声根拠（0..1）"),
   tone: z.number().nullable().default(null).describe("ギター音色モデルとの一致度（0..1）"),
+  bend: z.number().nullable().default(null).describe("チョーキング/スライド量（半音・符号付き）"),
+  vibrato: z.boolean().nullable().default(null).describe("ビブラート付きの音"),
   frame: z.string().nullable().default(null).describe("ブリッジ側の確認用フレーム画像名"),
 });
 
@@ -97,9 +99,14 @@ export const PlayEvent = z.object({
 });
 
 export const FretMap = z.object({
-  a: z.number().describe("ナット位置（ピクセル）"),
-  b: z.number().describe("スケール長（ピクセル）"),
+  a: z.number().describe("ナット位置（指板軸の投影座標・ピクセル）"),
+  b: z.number().describe("スケール長（指板軸の投影座標・ピクセル）"),
   w: z.number().int().describe("基準フレーム幅"),
+  h: z.number().int().nullable().default(null).describe("基準フレーム高"),
+  cx: z.number().nullable().default(null).describe("指板軸の原点x（マーカー座標）"),
+  cy: z.number().nullable().default(null).describe("指板軸の原点y"),
+  dx: z.number().nullable().default(null).describe("指板軸の単位ベクトルx（斜めネック対応）"),
+  dy: z.number().nullable().default(null).describe("指板軸の単位ベクトルy"),
   inliers: z.number().int(),
   residual: z.number(),
 });
@@ -111,6 +118,7 @@ export const PlayData = z.object({
   band: z.tuple([z.number(), z.number()]).nullable(),
   p90: z.number(),
   neck_xs: z.array(z.number().nullable()),
+  neck_ys: z.array(z.number().nullable()).default([]),
   fret_map: FretMap.nullable(),
 });
 
@@ -120,6 +128,8 @@ export const PerceptionNote = z.object({
   midi: z.number().int(),
   evidence: z.number().default(1),
   tone: z.number().default(1).describe("ギター音色モデルとの一致度（スコアのみ・除去はweb側）"),
+  bend: z.number().nullable().default(null).describe("チョーキング/スライド量（半音）"),
+  vibrato: z.boolean().nullable().default(null),
 });
 
 export const PerceptionChord = z.object({

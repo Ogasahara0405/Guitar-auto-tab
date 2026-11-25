@@ -176,7 +176,12 @@ function eventPlacements(
     if (spanF <= MAX_FRET_SPAN) out.push(row);
     else over.push(row); // 開きすぎ（押さえ方が無い場合の保険）
   }
-  const rows = out.length ? out : over;
+  if (!out.length) {
+    // 映像の弦/フレット仮説が「人間の手では押さえられない割当」を強制する場合は
+    // その仮説を棄却する（不可能な割当で代用しない → 自由な割当にフォールバック）
+    return restrict || fretPref ? [] : over;
+  }
+  const rows = out;
   rows.sort((a, b) => a[0] - b[0]);
   return rows.slice(0, 48);
 }
@@ -193,6 +198,18 @@ function placeTrans(p1: Placement[], p2: Placement[]): number {
   if (d > 7) cost += 0.3 * (d - 7);
   if (Math.abs(s2 - s1) > 0.5) cost += 0.3;
   return cost;
+}
+
+/** 近接した音どうし（ストラムのずれ等）は、合わせて人間の手の範囲に収まる必要がある */
+const NEAR_SIMULTANEOUS = 0.12;
+
+/** ほぼ同時に鳴る2つの割当が、合わせて手の範囲（開き3以内）に収まるか */
+function reachPenalty(p1: Placement[], p2: Placement[]): number {
+  const combined = [...p1, ...p2];
+  const strings = combined.map(([s]) => s);
+  if (new Set(strings).size !== strings.length) return 40.0; // 同じ弦の同時押さえは不可能
+  const excess = frettedSpan(combined) - MAX_FRET_SPAN;
+  return excess > 0 ? 40.0 * excess : 0.0;
 }
 
 /** DPで割当を解く。戻り値 (総コスト, 割当済みノート)。割当不能なら null */
@@ -221,12 +238,17 @@ function solve(
   for (let j = 0; j < placements[0].length; j++) dp[0].set(j, placements[0][j][0]);
 
   for (let i = 1; i < n; i++) {
+    // ストラムのずれ等でほぼ同時に鳴る音どうしは、合わせて手の範囲に収める
+    const nearSim =
+      Math.abs(events[i][0].start - events[i - 1][0].start) <= NEAR_SIMULTANEOUS;
     for (let j = 0; j < placements[i].length; j++) {
       const [cost, combo] = placements[i][j];
       let best = inf;
       let arg: number | null = null;
       for (const [pj, pcost] of dp[i - 1]) {
-        const t = pcost + placeTrans(placements[i - 1][pj][1], combo as Placement[]);
+        const prevCombo = placements[i - 1][pj][1];
+        const reach = nearSim ? reachPenalty(prevCombo, combo as Placement[]) : 0.0;
+        const t = pcost + placeTrans(prevCombo, combo as Placement[]) + reach;
         if (t < best) {
           best = t;
           arg = pj;

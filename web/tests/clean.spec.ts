@@ -19,7 +19,7 @@ const n = (
   end: number,
   midi: number,
   evidence = 1.0,
-): PerceptionNote => ({ start, end, midi, evidence, tone: 1.0 });
+): PerceptionNote => ({ start, end, midi, evidence, tone: 1.0, bend: null, vibrato: null });
 
 describe("cleanMelodyNotes", () => {
   it("断片ノート（極端に短い）を除去する", () => {

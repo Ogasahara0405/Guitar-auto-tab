@@ -17,14 +17,23 @@ const SUPPORT_WIN = 0.2; // ノート位置の映像を確認する窓（±秒�
 const SUPPORT_RATIO = 0.12; // 「演奏動作あり」とみなす動きの強度（映像内のp90比）
 const EVENT_MIN_DIST = 0.15; // 動作イベント間の最小間隔（秒）
 const NARROW_UNITS = 1.2; // 縦の広がりが弦1本分のこの倍未満なら「単弦ピッキング」
-// 動作解析フレームの幅（worker/video.py の MOTION_W と一致させる）
+// 動作解析フレームの幅・高さ（worker/video.py の MOTION_W/MOTION_H と一致させる）
 const MOTION_W = 320;
+const MOTION_H = 240;
 
-/** 指板座標（fmap.w 基準の x ピクセル）をフレット番号に変換する */
-export function fretAt(x: number, fmap: FretMap): number | null {
+/**
+ * 指板座標（マーカー座標系）をフレット番号に変換する。
+ * 指板軸（斜めネック対応）があれば軸に投影した座標で判定し、
+ * 軸情報が無い古い校正では x 座標のみで判定する（後方互換）。
+ */
+export function fretAt(x: number, y: number | null, fmap: FretMap): number | null {
   const { a, b } = fmap;
   if (b === 0) return null;
-  const r = (x - a) / b;
+  let u = x;
+  if (fmap.cx != null && fmap.dx != null && fmap.dy != null && y != null) {
+    u = (x - fmap.cx) * fmap.dx + (y - (fmap.cy ?? 0)) * fmap.dy;
+  }
+  const r = (u - a) / b;
   if (!(0.0 < r && r < 0.75)) return null;
   const n = -12.0 * Math.log2(1.0 - r);
   if (!(0.0 <= n && n <= 22.0)) return null;
@@ -154,22 +163,36 @@ export function gateNotes(notes: PerceptionNote[], play: PlayData | null): GateN
   const fretHints: FretHints = new Map();
   const fmap = play.fret_map;
   if (fmap && play.neck_xs.length === play.times.length) {
-    // neck_xs は動作解析フレーム（幅MOTION_W）基準 → マーカー座標系へ揃える
+    // neck_xs/neck_ys は動作解析フレーム（幅MOTION_W×高MOTION_H）基準
+    // → マーカー座標系へ揃える（横と縦でスケール比が異なる点に注意）
     const kx = fmap.w / MOTION_W;
+    const ky = (fmap.h ?? 0) / MOTION_H;
+    const median = (arr: number[]): number => {
+      const v = [...arr].sort((a, b) => a - b);
+      const mid = v.length >> 1;
+      return v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2;
+    };
     for (const n of final) {
-      const vals: number[] = [];
+      const xs: number[] = [];
+      const ys: number[] = [];
       for (let i = 0; i < play.times.length; i++) {
         const t = play.times[i];
         const nx = play.neck_xs[i];
-        if (t >= n.start - 0.25 && t <= n.start + 0.15 && nx != null && Number.isFinite(nx)) {
-          vals.push(nx);
+        const ny = play.neck_ys?.[i] ?? null;
+        if (
+          t >= n.start - 0.25 &&
+          t <= n.start + 0.15 &&
+          nx != null &&
+          Number.isFinite(nx) &&
+          ny != null &&
+          Number.isFinite(ny)
+        ) {
+          xs.push(nx);
+          ys.push(ny);
         }
       }
-      if (vals.length >= 2) {
-        vals.sort((a, b) => a - b);
-        const mid = vals.length >> 1;
-        const median = vals.length % 2 ? vals[mid] : (vals[mid - 1] + vals[mid]) / 2;
-        const fe = fretAt(median * kx, fmap);
+      if (xs.length >= 2) {
+        const fe = fretAt(median(xs) * kx, ky > 0 ? median(ys) * ky : null, fmap);
         if (fe != null) fretHints.set(round3(n.start), fe);
       }
     }

@@ -143,8 +143,14 @@ def cmd_perceive(args) -> None:
     chords_out = []
     chords_tempo = None
     if args.mode == "melody":
+        import librosa
+
+        # リズムギターのストロークノイズ等の打楽器的成分を抑えた調波成分で
+        # メロディを採譜する（リード/リズムの混在による誤検出を減らす）。
+        # 音色スコアは元波形で測る
+        y_h = librosa.effects.hpss(y)[0]
         model = tone.load_model()
-        for n in melody.extract_notes(y, sr):
+        for n in melody.extract_notes(y_h, sr):
             s = tone.guitar_likelihood(
                 y, sr, n["midi"], t0=n.get("start"), t1=n.get("end"), model=model
             )

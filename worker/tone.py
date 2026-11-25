@@ -32,7 +32,9 @@ VARIANTS = (0.75, 0.9, 1.05, 1.25, 1.5)  # ピッキングの明るさ違い（�
 # （ミュートした実音は通常弾きより倍音が早く落ちる）
 MUTE_VARIANTS = (0.45, 0.6, 0.72)
 MUTE_P_EXTRA = 0.45              # ミュート時は倍音減衰指数をさらに深くする
-MODEL_VERSION = 3
+# 歪み（ディストーション/ハムバッカー）の「倍音が豊かで減衰が遅い」音のバリアント
+DIST_P_EXTRA = -0.22             # 歪みは偶数次・奇数次倍音が豊か（p が下がる）
+MODEL_VERSION = 4
 
 MIN_SEGMENT = 0.12               # これ未満のノートは判定材料不足として除去しない（秒）
 MAX_SEGMENT = 0.6                # 判定に使う区間の上限（秒）
@@ -54,7 +56,7 @@ def _pickup_gain(f) -> np.ndarray:
     return g
 
 
-def _template_profile(f0: float, string_idx: int, fret: int, beta: float, mute: bool = False) -> np.ndarray:
+def _template_profile(f0: float, string_idx: int, fret: int, beta: float, mute: bool = False, dist: bool = False) -> np.ndarray:
     """1ポジションの倍音プロファイル（L2正規化）"""
     ks = np.arange(1, NHARM + 1, dtype=float)
     if string_idx <= 3:   # 6弦〜3弦: 巻き線（暗い）
@@ -64,6 +66,8 @@ def _template_profile(f0: float, string_idx: int, fret: int, beta: float, mute: 
     p -= 0.006 * fret     # フレットが高いほど単弦が短く、やや明るい
     if mute:              # パームミュート等: 高次倍音がさらに早く落ちる
         p += MUTE_P_EXTRA
+    if dist:              # 歪み/ハムバッカー: 倍音が豊か（減衰指数が浅い）
+        p += DIST_P_EXTRA
     a = ks ** (-p) * (beta ** (ks - 1)) * _pickup_gain(ks * f0)
     return a / float(np.sqrt((a * a).sum()))
 
@@ -85,6 +89,11 @@ def build_model() -> dict:
                 strs.append(6 - si)
                 frets.append(fret)
                 harms.append(_template_profile(f0, si, fret, beta, mute=True))
+            for beta in (0.85, 1.15):  # 歪み/ハムバッカーの倍音が豊かな音
+                mids.append(midi)
+                strs.append(6 - si)
+                frets.append(fret)
+                harms.append(_template_profile(f0, si, fret, beta, dist=True))
     model = {
         "midi": np.array(mids, dtype=np.int32),
         "string": np.array(strs, dtype=np.int32),
@@ -162,8 +171,9 @@ def _obs_profile(seg: np.ndarray, sr: int, f0: float):
 def _env_scores(seg: np.ndarray, sr: int):
     """波形包絡からアタック・減衰のらしさを測る（戻り値: atk, dec 各0..1）
 
-    ギターは「弾いた瞬間（先頭30ms）が最大」で「時間とともに減衰する」。
-    ボーカル・パッドは立ち上がりが遅く、減衰せず持続するためここで区別できる。
+    ギターは「弾いた瞬間（先頭30ms）が最大」。歪みやコンプで減衰しない
+    ロングトーン（サステイン）もギターとして扱い、減衰の重みは小さくする。
+    ボーカル・パッドとの区別は主にアタックの速さで行う。
     """
     hop = max(1, int(0.01 * sr))
     n = max(1, len(seg) // hop)
@@ -177,7 +187,7 @@ def _env_scores(seg: np.ndarray, sr: int):
     a0 = float(np.sqrt(np.mean(seg[:i30] ** 2)))
     a1 = float(np.sqrt(np.mean(seg[i30: min(i150, len(seg))] ** 2)))
     atk = float(np.clip((a0 / (a1 + 1e-9)) / 0.85, 0.25, 1.0))
-    # 対数減衰率（区間全体の最小二乗フィット。ギターは減る・持続音はほぼ0）
+    # 対数減衰率（区間全体の最小二乗フィット）
     i0 = max(1, int(0.10 * n))
     i1 = max(i0 + 3, int(0.92 * n))
     env = rms[i0:i1]
@@ -186,6 +196,7 @@ def _env_scores(seg: np.ndarray, sr: int):
         slope = float(np.polyfit(tt, np.log(env), 1)[0])
     else:
         slope = -0.5
+    # サステイン（slope≈0）でも0にならないようにする（歪みリードのロングトーン対策）
     dec = float(np.clip(-slope / 0.22, 0.0, 1.0))
     return atk, dec
 
@@ -220,8 +231,12 @@ def guitar_likelihood(y: np.ndarray, sr: int, midi: float,
     w = 1.0 / np.sqrt(np.arange(1, k + 1, dtype=float))
     obs_c = np.sqrt(np.maximum(obs, 0.0)) * w
     obs_n = obs_c / (float(np.linalg.norm(obs_c)) + 1e-9)
+    # 学習範囲外の音高（チョーキングで上がった音など）は、最も近い学習音高に
+    # 寄せて照合する（音色が合えばギターとして扱う）
+    all_midi = np.asarray(model["midi"], dtype=float)
+    midi_c = min(max(float(midi), float(all_midi.min())), float(all_midi.max()))
     sims = []
-    for i in np.nonzero(np.abs(np.asarray(model["midi"]) - float(midi)) <= 0.6)[0]:
+    for i in np.nonzero(np.abs(all_midi - midi_c) <= 0.6)[0]:
         t = np.asarray(model["harm"][i][:k], dtype=float)
         t_c = np.sqrt(np.maximum(t, 0.0)) * w
         tn = t_c / (float(np.linalg.norm(t_c)) + 1e-9)
@@ -231,6 +246,11 @@ def guitar_likelihood(y: np.ndarray, sr: int, midi: float,
     sim = max(sims)
 
     junk_score = float(np.clip(1.0 - 1.4 * junk_ratio, 0.0, 1.0))
+    # アタックが速く倍音構造がギターらしい音は、減衰しないロングトーンでも
+    # 減点しない（歪み・コンプで持続するリードのサステインを守る）。
+    # ノイズ（倍音構造なし）やアタックの遅い持続音は従来どおり下げる
+    if atk >= 0.7 and junk_score >= 0.5:
+        dec = max(dec, 0.7)
     score = sim * (0.55 + 0.45 * atk) * (0.62 + 0.38 * junk_score) * (0.55 + 0.45 * dec)
     return float(np.clip(score, 0.0, 1.0))
 

@@ -26,8 +26,11 @@ import { shapeFor } from "./voicing";
 import { renderPdf } from "./pdf";
 import { scoreToAscii } from "./render";
 
-/** ギターとみなす音色一致度の下限（ミュート音を拾えるよう0.45に調整） */
-const TONE_MIN = 0.45;
+/** ギターとみなす音色一致度の下限。
+ * Demucs 分離済みの場合はギター成分が濃縮されているため緩め（二重の足切りを防ぐ）、
+ * 未分離のミックスでは厳しめにする。 */
+const TONE_MIN_SEPARATED = 0.35;
+const TONE_MIN_DEFAULT = 0.45;
 
 /** 旧 uuid4().hex[:8] と同じ 8桁のジョブID */
 function newJobId(): string {
@@ -99,7 +102,8 @@ export async function analyze(ctx: WorkerCtx, params: AnalyzeParams): Promise<An
 
   if (params.mode === "melody") {
     // ギター音色モデルで無関係な音を除去（スコア未満を落とす）
-    const keptByTone = perc.notes.filter((n) => n.tone >= TONE_MIN);
+    const toneMin = perc.separated ? TONE_MIN_SEPARATED : TONE_MIN_DEFAULT;
+    const keptByTone = perc.notes.filter((n) => n.tone >= toneMin);
     toneDropped = perc.notes.length - keptByTone.length;
     // 不要音クリーニング（断片・弱い短音・根拠の弱い副次声を落とす）
     const [cleaned, d] = cleanMelodyNotes(keptByTone);
@@ -115,6 +119,8 @@ export async function analyze(ctx: WorkerCtx, params: AnalyzeParams): Promise<An
       fret: n.fret ?? null,
       evidence: (n.evidence as number | null | undefined) ?? null,
       tone: (n.tone as number | null | undefined) ?? null,
+      bend: (n.bend as number | null | undefined) ?? null,
+      vibrato: (n.vibrato as boolean | null | undefined) ?? null,
       frame: null,
     }));
   } else {

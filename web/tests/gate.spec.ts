@@ -28,15 +28,16 @@ function synthPlay(overrides: Partial<PlayData> = {}): PlayData {
     band: [20, 220],
     p90: 0.15,
     neck_xs: times.map(() => null),
+    neck_ys: times.map(() => null),
     fret_map: null,
     ...overrides,
   };
 }
 
 const notes: PerceptionNote[] = [
-  { start: 0.7, end: 1.0, midi: 52, evidence: 1.0, tone: 1.0 },
-  { start: 2.0, end: 2.3, midi: 64, evidence: 1.0, tone: 1.0 },
-  { start: 3.1, end: 3.4, midi: 57, evidence: 1.0, tone: 1.0 }, // 映像で演奏なし
+  { start: 0.7, end: 1.0, midi: 52, evidence: 1.0, tone: 1.0, bend: null, vibrato: null },
+  { start: 2.0, end: 2.3, midi: 64, evidence: 1.0, tone: 1.0, bend: null, vibrato: null },
+  { start: 3.1, end: 3.4, midi: 57, evidence: 1.0, tone: 1.0, bend: null, vibrato: null }, // 映像で演奏なし
 ];
 
 describe("gateNotes", () => {
@@ -50,9 +51,9 @@ describe("gateNotes", () => {
   it("単弦ピッキングの映像に3声が乗った場合は弱い声を絞る", () => {
     const play = synthPlay();
     const voices: PerceptionNote[] = [
-      { start: 0.7, end: 1.0, midi: 52, evidence: 1.0, tone: 1.0 },
-      { start: 0.72, end: 1.0, midi: 57, evidence: 1.0, tone: 1.0 },
-      { start: 0.74, end: 1.0, midi: 59, evidence: 0.3, tone: 1.0 },
+      { start: 0.7, end: 1.0, midi: 52, evidence: 1.0, tone: 1.0, bend: null, vibrato: null },
+      { start: 0.72, end: 1.0, midi: 57, evidence: 1.0, tone: 1.0, bend: null, vibrato: null },
+      { start: 0.74, end: 1.0, midi: 59, evidence: 0.3, tone: 1.0, bend: null, vibrato: null },
     ];
     const { notes: kept } = gateNotes(voices, play);
     expect(kept.map((n) => n.start)).toEqual([0.7, 0.72]);
@@ -79,23 +80,37 @@ describe("gateNotes", () => {
     expect(dropped).toBe(0);
   });
 
-  it("指板マーカーのフレット推定を手がかりとして返す", () => {
-    // ナット位置a=40・スケール長b=580（幅640基準）の指板座標系
-    const fmap = { a: 40, b: 580, w: 640, inliers: 8, residual: 1.0 };
-    const xOf = (f: number) => 40 + 580 * (1 - 2 ** (-f / 12));
-    // neck_xs は動作解析フレーム（幅320）基準なので半分の座標
+  it("指板マーカーのフレット推定を手がかりとして返す（斜めネックの2D軸対応）", () => {
+    // 30度傾いた指板軸: 原点(200,150)・スケール長500（マーカー座標640x320基準）
+    const th = Math.PI / 6;
+    const dxf = Math.cos(th);
+    const dyf = Math.sin(th);
+    const fmap = {
+      a: 30, b: 500, w: 640, h: 320, cx: 200, cy: 150, dx: dxf, dy: dyf,
+      inliers: 9, residual: 0.5,
+    };
+    const uOf = (f: number) => 30 + 500 * (1 - 2 ** (-f / 12));
+    // 動作解析フレーム（320x240）の座標に変換して左手位置を模擬する
+    const toMotion = (u: number): [number, number] => [
+      ((200 + dxf * u) * 320) / 640,
+      ((150 + dyf * u) * 240) / 320,
+    ];
     const times: number[] = [];
     const energy: number[] = [];
     const neck_xs: (number | null)[] = [];
+    const neck_ys: (number | null)[] = [];
     for (let i = 0; i < 48; i++) {
       const t = i / 12;
       times.push(t);
       const inBurst1 = t >= 0.5 && t < 0.9;
       const inBurst2 = t >= 1.8 && t < 2.2;
       energy.push(inBurst1 || inBurst2 ? 0.2 : 0.0);
-      neck_xs.push(inBurst1 ? (xOf(7) * 320) / 640 : inBurst2 ? (xOf(17) * 320) / 640 : null);
+      const u = inBurst1 ? uOf(7) : inBurst2 ? uOf(17) : null;
+      const xy = u === null ? null : toMotion(u);
+      neck_xs.push(xy ? xy[0] : null);
+      neck_ys.push(xy ? xy[1] : null);
     }
-    const play = synthPlay({ times, energy, neck_xs, fret_map: fmap });
+    const play = synthPlay({ times, energy, neck_xs, neck_ys, fret_map: fmap });
     const { notes: kept, fretHints } = gateNotes(notes, play);
     expect(kept).toHaveLength(2);
     expect(Math.abs((fretHints.get(0.7) ?? 99) - 7)).toBeLessThanOrEqual(1.5);
@@ -104,16 +119,29 @@ describe("gateNotes", () => {
 });
 
 describe("fretAt", () => {
-  const fmap = { a: 40, b: 580, w: 640, inliers: 8, residual: 1.0 };
-  it("指板座標をフレット番号に変換する", () => {
+  const fmap = { a: 40, b: 580, w: 640, h: 320, cx: null, cy: null, dx: null, dy: null, inliers: 8, residual: 1.0 };
+  it("指板座標をフレット番号に変換する（xのみ・後方互換）", () => {
     const x7 = 40 + 580 * (1 - 2 ** (-7 / 12));
-    expect(fretAt(x7, fmap)).toBe(7);
+    expect(fretAt(x7, null, fmap)).toBe(7);
     const x17 = 40 + 580 * (1 - 2 ** (-17 / 12));
-    expect(fretAt(x17, fmap)).toBe(17);
+    expect(fretAt(x17, null, fmap)).toBe(17);
   });
   it("ネック外・音域外は null", () => {
-    expect(fretAt(10, fmap)).toBeNull(); // ナットより前
-    expect(fretAt(619, fmap)).toBeNull(); // スケール長の75%以上
+    expect(fretAt(10, null, fmap)).toBeNull(); // ナットより前
+    expect(fretAt(619, null, fmap)).toBeNull(); // スケール長の75%以上
+  });
+  it("斜めの指板軸（2D）でもフレット番号に変換できる", () => {
+    // 30度傾いた指板軸: 原点 (200, 150)、方向 (cos30, sin30)
+    const th = Math.PI / 6;
+    const dxf = Math.cos(th);
+    const dyf = Math.sin(th);
+    const diag = { a: 30, b: 500, w: 640, h: 320, cx: 200, cy: 150, dx: dxf, dy: dyf, inliers: 9, residual: 0.5 };
+    for (const f of [3, 7, 12, 17]) {
+      const u = 30 + 500 * (1 - 2 ** (-f / 12));
+      const x = 200 + dxf * u;
+      const y = 150 + dyf * u;
+      expect(fretAt(x, y, diag), `fret ${f}`).toBe(f);
+    }
   });
 });
 

@@ -13,9 +13,9 @@ import librosa
 _N_FFT = 4096
 _HOP_MF = 512
 _HARMONICS = 6          # サリエンスに使う倍音数
-_MASK_HARMONICS = 8     # 主音判定後にマスクする倍音数
+_MASK_HARMONICS = 10    # 主音判定後にマスクする倍音数
 _PEAK_BINS = 2          # 倍音ピーク探索幅（±ビン）
-_MASK_BINS = 3          # マスク幅（±ビン・ビブラート分の余裕）
+_MASK_BINS = 5          # マスク幅（±ビン。ビブラート・ベンドで倍音が広がる分の余裕）
 _CAND_MIDI0, _CAND_MIDI1, _CAND_STEP = 38.0, 88.0, 0.25
 _SEC_MIN_RATIO = 0.30   # 副次音サリエンス / 主音サリエンス の下限
 _SEC_NEAR_RATIO = 0.50  # 主音に近い副次音の下限（ビブラートの広がり対策）
@@ -39,6 +39,52 @@ def _nan_median_filter(x: np.ndarray, size: int = 5) -> np.ndarray:
         if len(w):
             out[i] = float(np.median(w))
     return out
+
+
+# 量子化ヒステリシス（半音）。確定した音高から±この値以上動くまで遷移させない。
+# チョーキング（1〜2半音のグライド）や深いビブラートで隣の半音をまたいでも、
+# 音を細切れにしないための不感帯。
+_HYST = 0.65
+# これ以上連続的に動くピッチ移動をベンドとして記録する（半音）
+_BEND_MIN = 0.8
+# ビブラート判定（トレンド除去後の残差）
+_VIB_STD = 0.15
+
+
+def _hyst_quantize(x: np.ndarray) -> np.ndarray:
+    """ヒステリシス付き半音量子化（細切れノートの防止）"""
+    out = np.full(len(x), np.nan)
+    cur = np.nan
+    for i, v in enumerate(x):
+        if np.isnan(v):
+            continue
+        if np.isnan(cur) or abs(v - cur) >= _HYST:
+            cur = float(np.round(v))
+        out[i] = cur
+    return out
+
+
+def _annotate_glide(seg: dict) -> None:
+    """セグメント内のピッチ軌道から bend / vibrato 属性を推定して付与する。
+
+    - bend: 開始ピッチからの単調な移動量（半音、0.5単位）。チョーキング/スライド
+    - vibrato: 線形トレンド除去後に周期的な振動が残る場合
+    """
+    tr = seg.pop("track", None)
+    if not tr or len(tr) < 4:
+        return
+    ts = np.array([p[0] for p in tr], dtype=float)
+    ms = np.array([p[1] for p in tr], dtype=float)
+    k = min(3, len(ms) // 2)
+    drift = float(np.median(ms[-k:]) - np.median(ms[:k]))
+    if abs(drift) >= _BEND_MIN:
+        seg["bend"] = round(drift * 2.0) / 2.0
+    if len(ms) >= 8:
+        A = np.vstack([ts - ts.mean(), np.ones_like(ts)]).T
+        coef, *_ = np.linalg.lstsq(A, ms, rcond=None)
+        resid = ms - A @ coef
+        if float(np.std(resid)) >= _VIB_STD and float(np.ptp(resid)) >= 2.5 * _VIB_STD:
+            seg["vibrato"] = True
 
 
 # ---- 多声音検出ユーティリティ（スペクトル上の倍音サリエンス） ----
@@ -145,9 +191,11 @@ def extract_notes(y: np.ndarray, sr: int, hop_length: int = 256):
     同時発音（ダブルストップ等）は start が一致した複数ノートとして出力される。
 
     処理の流れ:
-      1. pyin でF0追跡 → 中央値平滑化 → 半音量子化
-      2. ピッチ連続性と無音ギャップでセグメント化
-         （セグメントの切れ目理由 "pitch"/"gap" を記録）
+      1. pyin でF0追跡 → 中央値平滑化 → ヒステリシス付き半音量子化
+         （チョーキング・深いビブラートで隣の半音をまたいでも音高を遷移させない）
+      2. ピッチ連続性と無音ギャップでセグメント化。
+         アタックを伴わない連続的なピッチ移動（ベンド/スライド/グリッサンド）は
+         ノートを切らず、開始ノートの属性 bend / vibrato として記録する
       3. 極小セグメント・ほぼ無音のセグメント（残存ブリード等）を除去 →
          同一音高の隣接セグメントを継続ノートとして結合（アタック時の一時的なピッチ誤差対策）
       4. 強いオンセットでのみ同音の再ピッキングを分割
@@ -168,7 +216,11 @@ def extract_notes(y: np.ndarray, sr: int, hop_length: int = 256):
     with np.errstate(divide="ignore", invalid="ignore"):
         midi = 69.0 + 12.0 * np.log2(f0 / 440.0)
     midi = np.where(np.isnan(midi), np.nan, midi)
-    midi_q = np.round(_nan_median_filter(midi, size=5))
+    midi_s = _nan_median_filter(midi, size=5)
+    midi_q = _hyst_quantize(midi_s)
+    onset_env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length)
+    if onset_env.shape[0] < midi_q.shape[0]:
+        onset_env = np.pad(onset_env, (0, midi_q.shape[0] - onset_env.shape[0]))
 
     # --- Stage 1: セグメント化 ---
     gap_frames = max(1, int(round(0.06 / frame_dur)))
@@ -184,6 +236,10 @@ def extract_notes(y: np.ndarray, sr: int, hop_length: int = 256):
             raw.append(cur)
             cur = None
 
+    def win_peak(arr, t_c, lo, hi):
+        w = (times >= t_c + lo) & (times <= t_c + hi)
+        return float(arr[w].max()) if w.any() else 0.0
+
     for i, t in enumerate(times):
         m = midi_q[i]
         if np.isnan(m):
@@ -197,13 +253,34 @@ def extract_notes(y: np.ndarray, sr: int, hop_length: int = 256):
                 "start": max(0.0, t - frame_dur / 2),
                 "midi": int(m),
                 "last": t,
+                "last_raw": float(midi_s[i]),
+                "track": [(float(t), float(midi_s[i]))],
+                "atk": win_peak(onset_env, max(0.0, t - 0.05), -0.02, 0.10),
             }
         elif int(m) == cur["midi"]:
             cur["last"] = t
+            cur["last_raw"] = float(midi_s[i])
+            cur["track"].append((float(t), float(midi_s[i])))
         else:
             boundary = (cur["last"] + t) / 2
+            # アタックを伴わず、ピッチが連続的に動く（ベンド/スライド）場合のみ
+            # ノートを切らない。急な音程の切り替わり（新しい弾き出し）は分割する
+            ref = cur["atk"] if cur["atk"] > 0 else float(np.median(onset_env)) + 1e-9
+            smooth = abs(float(midi_s[i]) - cur.get("last_raw", float(midi_s[i]))) < 0.9
+            if smooth and win_peak(onset_env, boundary, -0.05, 0.08) < 0.5 * ref:
+                cur["last"] = t
+                cur["last_raw"] = float(midi_s[i])
+                cur["track"].append((float(t), float(midi_s[i])))
+                continue
             close(boundary, "pitch")
-            cur = {"start": boundary, "midi": int(m), "last": t}
+            cur = {
+                "start": boundary,
+                "midi": int(m),
+                "last": t,
+                "last_raw": float(midi_s[i]),
+                "track": [(float(t), float(midi_s[i]))],
+                "atk": win_peak(onset_env, boundary, -0.02, 0.10),
+            }
     if cur is not None:
         close(cur["last"] + frame_dur / 2, "end")
 
@@ -211,7 +288,9 @@ def extract_notes(y: np.ndarray, sr: int, hop_length: int = 256):
     #     ほぼ無音のセグメント（残存ブリード・ノイズの誤検出）を除去 ---
     rms = librosa.feature.rms(y=y, hop_length=hop_length)[0]
     rms_times = librosa.times_like(rms, sr=sr, hop_length=hop_length)
-    energy_floor = 0.05 * float(np.percentile(rms, 90)) if len(rms) else 0.0
+    # フロアは曲中の最大音量（p90）基準で低めに: サビの大きいフレーズに
+    # 釣られて、控えめなメロディや減衰途中の音が消えないようにする
+    energy_floor = 0.02 * float(np.percentile(rms, 90)) if len(rms) else 0.0
 
     def seg_peak_rms(t0: float, t1: float) -> float:
         m = (rms_times >= t0) & (rms_times < t1)
@@ -231,12 +310,19 @@ def extract_notes(y: np.ndarray, sr: int, hop_length: int = 256):
         if merged and seg["midi"] == merged[-1]["midi"] and merged[-1]["closed_by"] != "gap":
             merged[-1]["end"] = seg["end"]
             merged[-1]["closed_by"] = seg["closed_by"]
+            merged[-1]["track"] = merged[-1].get("track", []) + seg.get("track", [])
         else:
             merged.append(dict(seg))
 
+    # ベンド/ビブラートをノート属性として記録（ピッチの連続移動で音を切らないため）
+    for seg in merged:
+        _annotate_glide(seg)
+
     # --- Stage 4: 再ピッキング分割（同音の連打） ---
-    # オンセット位置に加えて「エネルギーの深い落ち込み（ディップ）」が
-    # ある場合のみ分割する。アタック時の誤検出や減衰中の分裂を防ぐ。
+    # オンセット位置に加えて「エネルギーの深い落ち込み（ディップ）」か
+    # 「強いピッキングのアタック（スペクトルフラックス）」がある場合に分割する。
+    # 歪み（コンプレッション）でディップが浅い同音連打も、アタックの立ち上がりで
+    # 検出できるようにする。
     onsets = librosa.onset.onset_detect(
         y=y, sr=sr, hop_length=hop_length, units="time",
         backtrack=True, delta=0.2, wait=int(0.1 / frame_dur),
@@ -250,7 +336,7 @@ def extract_notes(y: np.ndarray, sr: int, hop_length: int = 256):
     for seg in merged:
         dur = seg["end"] - seg["start"]
         splits = []
-        if dur >= 0.3:
+        if dur >= 0.12:
             for o in onsets:
                 if not (seg["start"] + 0.1 < o < seg["end"] - 0.1):
                     continue
@@ -264,20 +350,31 @@ def extract_notes(y: np.ndarray, sr: int, hop_length: int = 256):
                 r_dip = float(rms[m][idx])
                 r_prev = rms_max(dip_t - 0.25, dip_t - 0.05)
                 r_next = rms_max(dip_t + 0.02, dip_t + 0.15)
-                if (
-                    r_dip < 0.5 * r_prev
-                    and r_dip < 0.5 * r_next
-                    and dip_t - seg["start"] >= 0.08
-                    and seg["end"] - dip_t >= 0.08
-                ):
-                    splits.append(dip_t)
+                deep_dip = r_dip < 0.5 * r_prev and r_dip < 0.5 * r_next
+                # ピッキングのアタック（スペクトルフラックス）がセグメント開始時と
+                # 同程度に立っていれば、浅いディップでも再ピッキングとみなす
+                strong = win_peak(onset_env, o, -0.04, 0.06) >= 0.8 * max(
+                    seg.get("atk") or 0.0, 1e-9
+                )
+                if not (deep_dip or strong):
+                    continue
+                if dip_t - seg["start"] >= 0.08 and seg["end"] - dip_t >= 0.08:
+                    splits.append(dip_t if deep_dip else float(o))
         if splits:
             pts = [seg["start"]] + sorted(splits) + [seg["end"]]
             for a, b in zip(pts[:-1], pts[1:]):
                 if b - a >= 0.06:
-                    out.append({"start": float(a), "end": float(b), "midi": seg["midi"]})
+                    item = {"start": float(a), "end": float(b), "midi": seg["midi"]}
+                    for k in ("bend", "vibrato"):
+                        if k in seg:
+                            item[k] = seg[k]
+                    out.append(item)
         else:
-            out.append({"start": float(seg["start"]), "end": float(seg["end"]), "midi": seg["midi"]})
+            item = {"start": float(seg["start"]), "end": float(seg["end"]), "midi": seg["midi"]}
+            for k in ("bend", "vibrato"):
+                if k in seg:
+                    item[k] = seg[k]
+            out.append(item)
 
     if not out:
         return []
@@ -362,7 +459,7 @@ def extract_notes(y: np.ndarray, sr: int, hop_length: int = 256):
         # （例: 3度・4度のダブルストップで、2音の最小公倍音の低い音を拾う）。
         # スペクトルから鳴っている音を直接検出する。
         amps = [_peak(S_seg, f_prim * k, sr, _N_FFT) for k in range(1, 7)]
-        if amps[0] < 0.25 * max(amps[1:]):
+        if amps[0] < 0.25 * max(amps[1:]) and not seg.get("bend"):
             S_work = S_seg.copy()
             ref = 0.0
             picked = []
@@ -409,6 +506,11 @@ def extract_notes(y: np.ndarray, sr: int, hop_length: int = 256):
 
         sal_prim = _salience(S_seg, cand_idx_row_for(f_prim))
         notes.append({**seg, "evidence": 1.0, "sec": False})
+
+        # ベンド/スライド中のセグメントは倍音が動いてリーク（誤った副次声）を
+        # 引き起こしやすいため、副次声の検出を行わない
+        if seg.get("bend"):
+            continue
 
         # マスク法で副次音を最大2つまで検出
         S_work = S_seg.copy()
@@ -464,12 +566,17 @@ def extract_notes(y: np.ndarray, sr: int, hop_length: int = 256):
         else:
             combined.append(dict(n))
 
-    return [
-        {
+    result = []
+    for n in combined:
+        item = {
             "start": round(float(n["start"]), 3),
             "end": round(float(n["end"]), 3),
             "midi": int(n["midi"]),
             "evidence": float(n.get("evidence", 1.0)),
         }
-        for n in combined
-    ]
+        if n.get("bend"):
+            item["bend"] = round(float(n["bend"]), 2)   # チョーキング/スライド（半音）
+        if n.get("vibrato"):
+            item["vibrato"] = True
+        result.append(item)
+    return result

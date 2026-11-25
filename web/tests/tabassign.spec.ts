@@ -116,6 +116,26 @@ describe("assignFrets", () => {
     checkTab(assigned);
   });
 
+  it("押さえられない割当を強制する映像仮説は棄却される（回帰: 4弦0F+5弦12F問題）", () => {
+    // ほぼ同時の2音に、人間の手では同時に押さえられないフレット位置を強制する仮説
+    const fretHints: FretHints = new Map([
+      [204.3, 12],
+      [204.39, 2],
+    ]);
+    const assigned = assignFrets(
+      [
+        { start: 204.3, end: 205.6, midi: 50, evidence: 0.43 },
+        { start: 204.39, end: 205.6, midi: 57, evidence: 1.0 },
+      ],
+      null,
+      fretHints,
+    );
+    expect(assigned).toHaveLength(2);
+    checkTab(assigned);
+    const frets = assigned.map((n) => n.fret!);
+    expect(Math.max(...frets) - Math.min(...frets)).toBeLessThanOrEqual(3);
+  });
+
   it("候補（弦/フレット）が音域を正しく表す", () => {
     expect(candidates(40)).toEqual([[0, 0]]);
     expect(candidates(41)).toEqual([[0, 1]]);

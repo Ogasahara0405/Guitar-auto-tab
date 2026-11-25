@@ -74,4 +74,20 @@ describe("buildScore", () => {
     expect(score2.events).toHaveLength(1);
     expect(Object.keys(score2.events[0].cells)).toHaveLength(2);
   });
+
+  it("ベンド・ビブラートがタブ表記（7b9 / 7~）になる", () => {
+    const bent = AnalysisBody.parse({
+      meta: { title: "t", duration: 4.0, tempo: 120.0, mode: "melody" },
+      notes: [
+        { start: 0.0, end: 0.8, midi: 64, string: 3, fret: 5, bend: 2.0 },
+        { start: 1.0, end: 1.8, midi: 60, string: 3, fret: 7, vibrato: true },
+      ],
+      chords: [],
+      beats: [],
+      barlines: [0.0, 2.0, 4.0],
+    });
+    const score = buildScore(bent);
+    expect(score.events[0].cells[2]).toBe("5b7"); // 5から7の音へ
+    expect(score.events[1].cells[2]).toBe("7~");
+  });
 });

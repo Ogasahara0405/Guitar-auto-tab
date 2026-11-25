@@ -127,6 +127,72 @@ def test_melody():
     print("test_melody OK")
 
 
+def test_repick_split():
+    """歪み（コンプレッション）で音量ディップが浅い同音連打も分割されること"""
+    SR_ = SR
+
+    def hit(m0, dur=0.45):
+        t = np.arange(int(dur * SR_)) / SR_
+        f = 440.0 * 2 ** ((m0 - 69) / 12)
+        y = np.sin(2 * np.pi * f * t) + 0.4 * np.sin(4 * np.pi * f * t)
+        return (0.35 * y * np.exp(-t * 1.2) * np.minimum(t / 0.003, 1)).astype("float32")
+
+    # 同音（E4）を5連打。前の音の減衰と重ねてディップを浅くする（歪みギター風）
+    stride = 0.22
+    total = int((stride * 5 + 0.5) * SR_)
+    y = np.zeros(total, dtype="float32")
+    for i in range(5):
+        h = hit(64)
+        off = int(i * stride * SR_)
+        y[off: off + len(h)] += h
+    notes = melody.extract_notes(y, SR_)
+    ns = [n for n in notes if n["midi"] == 64]
+    print(f"  同音連打: {[(round(n['start'], 2), n['midi']) for n in notes]}")
+    assert len(ns) >= 4, f"同音連打が分割されていない: {notes}"
+    print("test_repick_split OK")
+
+
+def test_bend_vibrato():
+    """チョーキング・深いビブラートで音が細切れにならず、属性として記録されること"""
+    SR_ = SR
+
+    def note_glide(m0, semis, dur=0.8):
+        t = np.arange(int(dur * SR_)) / SR_
+        prog = np.minimum(t / (dur * 0.7), 1.0)
+        m = m0 + semis * prog
+        f = 440.0 * 2 ** ((m - 69) / 12)
+        ph = 2 * np.pi * np.cumsum(f) / SR_
+        y = np.sin(ph) + 0.4 * np.sin(2 * ph) + 0.15 * np.sin(3 * ph)
+        # 末尾は滑らかにフェードして減衰の尾による再検出を防ぐ
+        fade = np.minimum((dur - t) / 0.06, 1.0)
+        env = np.exp(-t * 1.2) * np.minimum(t / 0.004, 1) * np.maximum(fade, 0.0)
+        return (0.35 * y * env).astype("float32")
+
+    def note_vib(m0, dur=1.0, vib_semi=0.5, vib_hz=5.5):
+        t = np.arange(int(dur * SR_)) / SR_
+        m = m0 + vib_semi * np.sin(2 * np.pi * vib_hz * t)
+        f = 440.0 * 2 ** ((m - 69) / 12)
+        ph = 2 * np.pi * np.cumsum(f) / SR_
+        y = np.sin(ph) + 0.4 * np.sin(2 * ph)
+        return (0.35 * y * np.exp(-t * 1.0) * np.minimum(t / 0.004, 1)).astype("float32")
+
+    g = np.zeros(int(0.08 * SR_), dtype="float32")
+
+    # 1) +2半音のチョーキング → 1ノート・bend=+2・開始音高を保持
+    r1 = melody.extract_notes(np.concatenate([g, note_glide(64, +2), g]), SR_)
+    assert len(r1) == 1, f"チョーキングが細切れになっている: {r1}"
+    assert r1[0]["midi"] == 64, f"ベンドの開始音高が不正: {r1}"
+    assert abs(r1[0].get("bend", 0) - 2.0) <= 0.5, f"ベンド量が不正: {r1}"
+
+    # 2) 深いビブラート（±0.5半音） → 1ノート・vibrato 属性
+    r2 = melody.extract_notes(np.concatenate([g, note_vib(60), g]), SR_)
+    assert len(r2) == 1, f"ビブラートで細切れになっている: {r2}"
+    assert r2[0]["midi"] == 60
+    assert r2[0].get("vibrato") is True, f"ビブラート属性が無い: {r2}"
+
+    print("test_bend_vibrato OK")
+
+
 def test_polyphony():
     """複数本指（ダブルストップ・オクターブ）の同時発音を検出し、単音に誤検出しないこと"""
     y = np.concatenate([
@@ -241,6 +307,48 @@ def test_video_play():
     print("test_video_play OK")
 
 
+def test_fret_markers_diagonal():
+    """斜めのネック（指板軸が傾いている）でも黒丸からフレット座標を推定できること"""
+    W, H, FPS, DUR = 640, 360, 30, 1.0
+    n_frames = int(DUR * FPS)
+    frames = np.full((n_frames, H, W, 3), 210, dtype=np.uint8)
+    th = np.deg2rad(30.0)
+    dx, dy = float(np.cos(th)), float(np.sin(th))
+    cx, cy, b = 150.0, 200.0, 500.0
+
+    def pos(f):
+        u = b * (1 - 2 ** (-f / 12))
+        return cx + dx * u, cy + dy * u
+
+    for f in (3, 5, 7, 9, 12, 15, 17):
+        x, y = (int(v) for v in pos(f))
+        frames[:, y - 8: y + 8, x - 8: x + 8] = 25  # 黒丸
+
+    with tempfile.TemporaryDirectory() as td:
+        src = str(Path(td) / "diag.mp4")
+        ff = audio.get_ffmpeg_exe()
+        res = subprocess.run(
+            [ff, "-y", "-f", "rawvideo", "-pix_fmt", "rgb24",
+             "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-",
+             "-pix_fmt", "yuv420p", src],
+            input=frames.tobytes(), capture_output=True,
+        )
+        assert res.returncode == 0, f"テスト映像の生成に失敗: {res.stderr[-300:]}"
+
+        fmap = video.analyze_fret_map(src)
+        assert fmap, "斜めネックの黒丸から指板座標を推定できない"
+        assert abs(fmap["dy"]) > 0.3, f"指板軸が水平に戻ってしまっている: {fmap}"
+        # マーカー検出フレーム（480x320）へスケールしてから投影する
+        kx, ky = 480.0 / W, 320.0 / H
+        for f in (3, 7, 12, 17):
+            x, y = pos(f)
+            xm, ym = x * kx, y * ky
+            u = (xm - fmap["cx"]) * fmap["dx"] + (ym - fmap["cy"]) * fmap["dy"]
+            est = fmap["a"] + fmap["b"] * (1 - 2 ** (-f / 12))
+            assert abs(u - est) <= 4.0, f"フレット{f}の投影位置がずれている: {u:.1f} vs {est:.1f}"
+    print("test_fret_markers_diagonal OK")
+
+
 def test_fret_markers():
     """指板の黒丸マーカー（3/5/7/9/12/15/17/19/21、12は黒丸2つ）からフレット位置を推定する"""
     W, H, FPS, DUR = 640, 360, 30, 4.0
@@ -280,11 +388,14 @@ def test_fret_markers():
 
         fmap = video.analyze_fret_map(src)
         assert fmap, "黒丸マーカーから指板座標を推定できない"
+        # 2D軸（指板軸）の投影座標で検証する（水平ネックでは軸が水平になる）
         k = 480.0 / W  # マーカー検出フレーム（幅480）へのスケール
-        err = [
-            abs((fmap["a"] + fmap["b"] * (1 - 2 ** (-f / 12))) - x_of(f) * k)
-            for f in (3, 12, 21)
-        ]
+        ky = 320.0 / H
+        err = []
+        for f in (3, 12, 21):
+            xm, ym = x_of(f) * k, 178.0 * ky
+            u = (xm - fmap["cx"]) * fmap["dx"] + (ym - fmap["cy"]) * fmap["dy"]
+            err.append(abs(u - (fmap["a"] + fmap["b"] * (1 - 2 ** (-f / 12)))))
         print(f"  指板座標: a={fmap['a']:.1f} b={fmap['b']:.1f} インライア={fmap['inliers']} 誤差={[round(e, 1) for e in err]}")
         assert max(err) <= 4.0, f"マーカー位置の推定がずれている: {err}"
 
@@ -440,11 +551,14 @@ def test_worker_cli():
 
 if __name__ == "__main__":
     test_melody()
+    test_bend_vibrato()
+    test_repick_split()
     test_polyphony()
     test_mute_filter()
     test_frames()
     test_video_play()
     test_fret_markers()
+    test_fret_markers_diagonal()
     test_tone_model()
     test_chords_extract()
     test_worker_cli()

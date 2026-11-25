@@ -36,6 +36,20 @@ export interface Score {
 }
 
 /**
+ * フレット数字の表示文字列（ベンド・ビブラート記号付き）。
+ * チョーキングは "7b9"（7から9の音まで上げる）、ビブラートは "7~" の標準表記。
+ */
+export function fretText(fret: number, bend?: number | null, vibrato?: boolean | null): string {
+  let s = String(fret);
+  if (bend) {
+    const target = fret + Math.round(bend);
+    s += "b" + String(target);
+  }
+  if (vibrato) s += "~";
+  return s;
+}
+
+/**
  * 解析結果JSON → 描画用スコア情報。
  * slots_per_beat を省略するとノート密度から自動選択（2分割/16分グリッド）。
  */
@@ -102,7 +116,10 @@ export function buildScore(result: AnalysisBody, slotsPerBeat?: number): Score {
     const cells: Record<number, string> = {};
     for (const n of group) {
       const row = (n as NoteEvent).string! - 1; // 1弦→row0(上)
-      if (0 <= row && row <= 5) cells[row] = String(Math.round((n as NoteEvent).fret!));
+      if (0 <= row && row <= 5) {
+        const nn = n as NoteEvent;
+        cells[row] = fretText(Math.round(nn.fret!), nn.bend, nn.vibrato);
+      }
     }
     const [mi, slot] = place(group[0].start);
     events.push({ measure: mi, slot, cells, label: null });
